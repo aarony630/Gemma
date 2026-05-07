@@ -62,3 +62,5 @@ def test_transcribe_audio_returns_text():
 
     assert result == "patient had a good day"
     mock_recognizer.recognize_google.assert_called_once_with(fake_audio_data)
+    source_mock = mock_audio_file_instance.__enter__.return_value
+    mock_recognizer.record.assert_called_once_with(source_mock)
