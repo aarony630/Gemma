@@ -7,12 +7,12 @@ from report import list_report_dates, load_report
 st.title("Family Report")
 
 dates = list_report_dates()
-today = date.today().isoformat()
 
 if not dates:
     st.info("No reports have been submitted yet.")
     time.sleep(30)
     st.rerun()
+    st.stop()
 
 selected = st.selectbox("Select date", dates, index=0)
 report = load_report(selected)
@@ -24,7 +24,7 @@ else:
         st.error("Urgent: Please contact the caregiver")
 
     st.subheader("Summary")
-    st.write(report["summary"])
+    st.write(report.get("summary", "No summary available."))
 
     col1, col2, col3 = st.columns(3)
     with col1:
