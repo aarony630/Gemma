@@ -16,8 +16,7 @@ You will receive a caregiver's daily health report for {patient_name}. It may in
 a voice transcript, typed notes, or both. The notes may contain medical terminology.
 
 Your job:
-1. Combine all input into a plain-language summary (3-5 sentences) — no jargon
-2. Extract 3 highlights
+Combine all input into a plain-language summary (3-5 sentences) — no jargon.
 
 Reply in this exact JSON format with no extra text:
 {{
@@ -33,9 +32,9 @@ def _report_path(date_str: str) -> str:
 
 
 def save_report(data: dict) -> None:
-    data["timestamp"] = datetime.now().isoformat(timespec="seconds")
+    record = {**data, "timestamp": datetime.now().isoformat(timespec="seconds")}
     with open(_report_path(date.today().isoformat()), "w") as f:
-        json.dump(data, f, indent=2)
+        json.dump(record, f, indent=2)
 
 
 def load_report(date_str: str) -> dict | None:
