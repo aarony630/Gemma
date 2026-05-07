@@ -85,6 +85,10 @@ def test_summarize_report_returns_parsed_dict():
     assert result["mood"] == "calm"
     assert result["urgent"] is False
     assert "Lisinopril" in result["medications_noted"]
+    call_kwargs = mock_client.models.generate_content.call_args.kwargs
+    assert "Aaron" in call_kwargs["config"].system_instruction
+    assert "patient seemed calm" in call_kwargs["contents"]
+    assert "BP was 120/80" in call_kwargs["contents"]
 
 
 def test_summarize_report_handles_markdown_fences():

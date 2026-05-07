@@ -9,6 +9,23 @@ from google import genai
 from google.genai import types
 
 _REPORT_PREFIX = "report_"
+_SYSTEM_PROMPT = """\
+You are a medical report summarizer for a family member with no medical background.
+
+You will receive a caregiver's daily health report for {patient_name}. It may include \
+a voice transcript, typed notes, or both. The notes may contain medical terminology.
+
+Your job:
+1. Combine all input into a plain-language summary (3-5 sentences) — no jargon
+2. Extract 3 highlights
+
+Reply in this exact JSON format with no extra text:
+{{
+  "summary": "...",
+  "mood": "...",
+  "medications_noted": ["..."],
+  "urgent": false
+}}"""
 
 
 def _report_path(date_str: str) -> str:
@@ -44,26 +61,9 @@ def transcribe_audio(wav_bytes: bytes) -> str:
     return recognizer.recognize_google(audio)
 
 
-_SYSTEM_PROMPT = """\
-You are a medical report summarizer for a family member with no medical background.
-
-You will receive a caregiver's daily health report for {patient_name}. It may include \
-a voice transcript, typed notes, or both. The notes may contain medical terminology.
-
-Your job:
-1. Combine all input into a plain-language summary (3-5 sentences) — no jargon
-2. Extract 3 highlights
-
-Reply in this exact JSON format with no extra text:
-{{
-  "summary": "...",
-  "mood": "...",
-  "medications_noted": ["..."],
-  "urgent": false
-}}"""
-
-
 def summarize_report(patient_name: str, transcript: str, notes: str) -> dict:
+    if not transcript and not notes:
+        raise ValueError("At least one of transcript or notes must be provided.")
     parts = []
     if transcript:
         parts.append(f"Voice transcript: {transcript}")
