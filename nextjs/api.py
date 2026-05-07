@@ -37,6 +37,8 @@ def get_patient():
 @app.post("/transcribe")
 async def transcribe(request: Request):
     audio_bytes = await request.body()
+    if not audio_bytes:
+        raise HTTPException(status_code=422, detail="No audio data received")
     try:
         segment = AudioSegment.from_file(io.BytesIO(audio_bytes))
         wav_buffer = io.BytesIO()
@@ -72,7 +74,10 @@ class ReportBody(BaseModel):
 
 @app.post("/reports")
 def create_report(body: ReportBody):
-    save_report(body.model_dump())
+    try:
+        save_report(body.model_dump())
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
     return {"date": date.today().isoformat()}
 
 

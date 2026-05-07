@@ -52,6 +52,15 @@ def test_transcribe_failure(client):
     assert response.status_code == 422
 
 
+def test_transcribe_empty_body(client):
+    response = client.post(
+        "/transcribe",
+        content=b"",
+        headers={"Content-Type": "application/octet-stream"},
+    )
+    assert response.status_code == 422
+
+
 def test_summarize(client):
     fake_result = {"summary": "ok", "mood": "calm", "medications_noted": [], "urgent": False}
     with patch("nextjs.api.summarize_report", return_value=fake_result):
@@ -73,11 +82,12 @@ def test_summarize_empty_inputs(client):
 
 
 def test_create_report(client):
-    with patch("nextjs.api.save_report"):
+    with patch("nextjs.api.save_report") as mock_save:
         response = client.post(
             "/reports",
             json={"summary": "ok", "mood": "calm", "medications_noted": [], "urgent": False},
         )
+    mock_save.assert_called_once()
     assert response.status_code == 200
     assert "date" in response.json()
 
