@@ -1,5 +1,4 @@
 import time
-from datetime import date
 
 import streamlit as st
 from report import list_report_dates, load_report
