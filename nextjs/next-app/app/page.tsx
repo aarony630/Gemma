@@ -17,6 +17,12 @@ export default function Home() {
         >
           Family
         </Link>
+        <Link
+          href="/medications"
+          className="block text-center bg-purple-600 text-white text-xl font-semibold py-6 rounded-2xl shadow active:bg-purple-700"
+        >
+          Medications
+        </Link>
       </div>
     </main>
   );

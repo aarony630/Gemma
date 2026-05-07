@@ -26,6 +26,21 @@ export interface Report {
   timestamp?: string;
 }
 
+export interface Medication {
+  name: string;
+  dosage: string;
+  instructions: string;
+  side_effects: string[];
+}
+
+export interface Prescription {
+  id: string;
+  patient_id: string;
+  uploaded_at: string;
+  source: "upload" | "simulated_epic";
+  medications: Medication[];
+}
+
 export const api = {
   getPatient: () => request<{ name: string }>("/patient"),
 
@@ -53,4 +68,17 @@ export const api = {
   listReports: () => request<{ dates: string[] }>("/reports"),
 
   getReport: (date: string) => request<Report>(`/reports/${date}`),
+
+  uploadPrescription: (pdf: File) =>
+    request<Prescription>("/prescriptions/upload", {
+      method: "POST",
+      body: pdf,
+      headers: { "Content-Type": "application/pdf" },
+    }),
+
+  syncPrescription: () =>
+    request<Prescription>("/prescriptions/sync", { method: "POST" }),
+
+  listPrescriptions: () =>
+    request<{ prescriptions: Prescription[] }>("/prescriptions"),
 };
