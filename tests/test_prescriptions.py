@@ -58,6 +58,21 @@ def test_parse_prescription_raises_on_empty_pdf():
             parse_prescription(b"empty pdf")
 
 
+def test_parse_prescription_raises_on_unparseable_response():
+    from prescriptions import parse_prescription
+
+    fake_response = MagicMock()
+    fake_response.text = "Sorry, I cannot extract medications from this text."
+    mock_client = MagicMock()
+    mock_client.models.generate_content.return_value = fake_response
+
+    with patch("prescriptions.pdfplumber.open", return_value=_make_mock_pdf("some text")), \
+         patch("prescriptions.genai.Client", return_value=mock_client), \
+         patch.dict("os.environ", {"GOOGLE_API_KEY": "fake-key"}):
+        with pytest.raises(ValueError, match="Could not parse medications"):
+            parse_prescription(b"fake pdf bytes")
+
+
 def test_save_prescription_inserts_row():
     from prescriptions import save_prescription
 

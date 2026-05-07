@@ -71,10 +71,21 @@ def parse_prescription(pdf_bytes: bytes) -> list[dict]:
     )
 
     raw = response.text.strip()
-    match = re.search(r"\[.*\]", raw, re.DOTALL)
-    if not match:
+    # Use non-greedy regex with bracket counting to handle nested structures
+    start = raw.find('[')
+    if start == -1:
         raise ValueError(f"Could not parse medications from model response: {raw}")
-    return json.loads(match.group())
+
+    bracket_count = 0
+    for i in range(start, len(raw)):
+        if raw[i] == '[':
+            bracket_count += 1
+        elif raw[i] == ']':
+            bracket_count -= 1
+            if bracket_count == 0:
+                return json.loads(raw[start:i+1])
+
+    raise ValueError(f"Could not parse medications from model response: {raw}")
 
 
 def save_prescription(medications: list[dict], source: str) -> dict:
@@ -84,6 +95,8 @@ def save_prescription(medications: list[dict], source: str) -> dict:
         .insert({"patient_id": PATIENT_ID, "source": source, "medications": medications})
         .execute()
     )
+    if not result.data:
+        raise ValueError("Supabase insert returned no data — check RLS policies and table schema")
     return result.data[0]
 
 
