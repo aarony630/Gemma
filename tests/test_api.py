@@ -140,6 +140,15 @@ def test_upload_prescription_parse_failure(client):
     assert response.status_code == 422
 
 
+def test_upload_prescription_empty_body(client):
+    response = client.post(
+        "/prescriptions/upload",
+        content=b"",
+        headers={"Content-Type": "application/pdf"},
+    )
+    assert response.status_code == 422
+
+
 def test_sync_prescription(client):
     fake_row = {"id": "uuid-456", "uploaded_at": "2026-05-07T10:00:00",
                 "source": "simulated_epic", "medications": [], "patient_id": "aaron"}
@@ -149,6 +158,12 @@ def test_sync_prescription(client):
 
     assert response.status_code == 200
     assert response.json()["source"] == "simulated_epic"
+
+
+def test_sync_prescription_failure(client):
+    with patch("nextjs.api.save_prescription", side_effect=Exception("db error")):
+        response = client.post("/prescriptions/sync")
+    assert response.status_code == 500
 
 
 def test_get_prescriptions_list(client):

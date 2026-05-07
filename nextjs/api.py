@@ -98,6 +98,8 @@ def get_report(report_date: str):
 @app.post("/prescriptions/upload")
 async def upload_prescription(request: Request):
     pdf_bytes = await request.body()
+    if not pdf_bytes:
+        raise HTTPException(status_code=422, detail="No PDF data received")
     try:
         medications = parse_prescription(pdf_bytes)
         row = save_prescription(medications, "upload")
