@@ -111,3 +111,52 @@ def test_get_report_not_found(client):
     with patch("nextjs.api.load_report", return_value=None):
         response = client.get("/reports/1900-01-01")
     assert response.status_code == 404
+
+
+def test_upload_prescription(client):
+    fake_meds = [{"name": "Lisinopril", "dosage": "10mg", "instructions": "Daily", "side_effects": []}]
+    fake_row = {"id": "uuid-123", "uploaded_at": "2026-05-07T10:00:00",
+                "source": "upload", "medications": fake_meds, "patient_id": "aaron"}
+
+    with patch("nextjs.api.parse_prescription", return_value=fake_meds), \
+         patch("nextjs.api.save_prescription", return_value=fake_row):
+        response = client.post(
+            "/prescriptions/upload",
+            content=b"fake pdf",
+            headers={"Content-Type": "application/pdf"},
+        )
+
+    assert response.status_code == 200
+    assert response.json()["id"] == "uuid-123"
+
+
+def test_upload_prescription_parse_failure(client):
+    with patch("nextjs.api.parse_prescription", side_effect=ValueError("Could not extract text")):
+        response = client.post(
+            "/prescriptions/upload",
+            content=b"bad pdf",
+            headers={"Content-Type": "application/pdf"},
+        )
+    assert response.status_code == 422
+
+
+def test_sync_prescription(client):
+    fake_row = {"id": "uuid-456", "uploaded_at": "2026-05-07T10:00:00",
+                "source": "simulated_epic", "medications": [], "patient_id": "aaron"}
+
+    with patch("nextjs.api.save_prescription", return_value=fake_row):
+        response = client.post("/prescriptions/sync")
+
+    assert response.status_code == 200
+    assert response.json()["source"] == "simulated_epic"
+
+
+def test_get_prescriptions_list(client):
+    mock_data = [{"id": "uuid-1", "uploaded_at": "2026-05-07", "source": "upload",
+                  "medications": [], "patient_id": "aaron"}]
+
+    with patch("nextjs.api.list_prescriptions", return_value=mock_data):
+        response = client.get("/prescriptions")
+
+    assert response.status_code == 200
+    assert len(response.json()["prescriptions"]) == 1

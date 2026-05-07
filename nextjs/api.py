@@ -14,6 +14,7 @@ from report import (
     summarize_report,
     transcribe_audio,
 )
+from prescriptions import parse_prescription, save_prescription, list_prescriptions, SIMULATED_EPIC_MEDS
 
 app = FastAPI()
 
@@ -92,3 +93,32 @@ def get_report(report_date: str):
     if report is None:
         raise HTTPException(status_code=404, detail="No report for this date")
     return report
+
+
+@app.post("/prescriptions/upload")
+async def upload_prescription(request: Request):
+    pdf_bytes = await request.body()
+    try:
+        medications = parse_prescription(pdf_bytes)
+        row = save_prescription(medications, "upload")
+        return row
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/prescriptions/sync")
+def sync_prescription():
+    try:
+        return save_prescription(SIMULATED_EPIC_MEDS, "simulated_epic")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/prescriptions")
+def get_prescriptions():
+    try:
+        return {"prescriptions": list_prescriptions()}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
