@@ -35,3 +35,10 @@ def list_report_dates() -> list[str]:
         if f.startswith(_REPORT_PREFIX) and f.endswith(".json")
     ]
     return sorted([f[len(_REPORT_PREFIX):-5] for f in files], reverse=True)
+
+
+def transcribe_audio(wav_bytes: bytes) -> str:
+    recognizer = sr.Recognizer()
+    with sr.AudioFile(io.BytesIO(wav_bytes)) as source:
+        audio = recognizer.record(source)
+    return recognizer.recognize_google(audio)
