@@ -42,3 +42,46 @@ def transcribe_audio(wav_bytes: bytes) -> str:
     with sr.AudioFile(io.BytesIO(wav_bytes)) as source:
         audio = recognizer.record(source)
     return recognizer.recognize_google(audio)
+
+
+_SYSTEM_PROMPT = """\
+You are a medical report summarizer for a family member with no medical background.
+
+You will receive a caregiver's daily health report for {patient_name}. It may include \
+a voice transcript, typed notes, or both. The notes may contain medical terminology.
+
+Your job:
+1. Combine all input into a plain-language summary (3-5 sentences) — no jargon
+2. Extract 3 highlights
+
+Reply in this exact JSON format with no extra text:
+{{
+  "summary": "...",
+  "mood": "...",
+  "medications_noted": ["..."],
+  "urgent": false
+}}"""
+
+
+def summarize_report(patient_name: str, transcript: str, notes: str) -> dict:
+    parts = []
+    if transcript:
+        parts.append(f"Voice transcript: {transcript}")
+    if notes:
+        parts.append(f"Written notes: {notes}")
+    combined = "\n\n".join(parts)
+
+    client = genai.Client(api_key=os.environ["GOOGLE_API_KEY"])
+    response = client.models.generate_content(
+        model="gemma-4-31b-it",
+        config=types.GenerateContentConfig(
+            system_instruction=_SYSTEM_PROMPT.format(patient_name=patient_name)
+        ),
+        contents=combined,
+    )
+
+    raw = response.text.strip()
+    match = re.search(r"\{.*\}", raw, re.DOTALL)
+    if not match:
+        raise ValueError(f"Could not parse JSON from model response: {raw}")
+    return json.loads(match.group())

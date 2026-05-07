@@ -64,3 +64,43 @@ def test_transcribe_audio_returns_text():
     mock_recognizer.recognize_google.assert_called_once_with(fake_audio_data)
     source_mock = mock_audio_file_instance.__enter__.return_value
     mock_recognizer.record.assert_called_once_with(source_mock)
+
+
+def test_summarize_report_returns_parsed_dict():
+    from report import summarize_report
+    from unittest.mock import patch, MagicMock
+
+    fake_response = MagicMock()
+    fake_response.text = (
+        '{"summary": "Aaron had a calm day.", "mood": "calm",'
+        ' "medications_noted": ["Lisinopril"], "urgent": false}'
+    )
+    mock_client = MagicMock()
+    mock_client.models.generate_content.return_value = fake_response
+
+    with patch("report.genai.Client", return_value=mock_client), \
+         patch.dict("os.environ", {"GOOGLE_API_KEY": "fake-key"}):
+        result = summarize_report("Aaron", "patient seemed calm", "BP was 120/80")
+
+    assert result["mood"] == "calm"
+    assert result["urgent"] is False
+    assert "Lisinopril" in result["medications_noted"]
+
+
+def test_summarize_report_handles_markdown_fences():
+    from report import summarize_report
+    from unittest.mock import patch, MagicMock
+
+    fake_response = MagicMock()
+    fake_response.text = (
+        '```json\n{"summary": "ok", "mood": "tired",'
+        ' "medications_noted": [], "urgent": false}\n```'
+    )
+    mock_client = MagicMock()
+    mock_client.models.generate_content.return_value = fake_response
+
+    with patch("report.genai.Client", return_value=mock_client), \
+         patch.dict("os.environ", {"GOOGLE_API_KEY": "fake-key"}):
+        result = summarize_report("Aaron", "", "patient was tired")
+
+    assert result["mood"] == "tired"
