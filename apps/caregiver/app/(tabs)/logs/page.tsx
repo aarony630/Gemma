@@ -59,6 +59,81 @@ export default function LogsPage() {
   const fallbackPollingRef = useRef(false);
   const transcribeInFlightRef = useRef(false);
 
+  // Re-hydrate today's conversation from Supabase on mount / patient change.
+  // INITIAL_CONVERSATION stays as a placeholder seed when no real data exists.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const today = new Date().toISOString().slice(0, 10);
+      const [logsRes, reportsRes] = await Promise.all([
+        supabase
+          .from('caregiver_logs')
+          .select('*')
+          .eq('caregiver_id', CAREGIVER_ID)
+          .eq('patient_id', activePatientId)
+          .eq('visit_date', today)
+          .order('created_at'),
+        supabase
+          .from('compiled_reports')
+          .select('*')
+          .eq('caregiver_id', CAREGIVER_ID)
+          .eq('patient_id', activePatientId)
+          .eq('visit_date', today)
+          .order('created_at'),
+      ]);
+      if (cancelled) return;
+
+      const turns: { ts: string; turn: ConversationTurn }[] = [];
+      for (const log of logsRes.data ?? []) {
+        const time = new Date(log.created_at).toLocaleTimeString('en-US', {
+          hour: 'numeric',
+          minute: '2-digit',
+          hour12: false,
+        });
+        turns.push({
+          ts: log.created_at,
+          turn: {
+            kind: 'user-audio',
+            id: `log-${log.id}`,
+            time,
+            transcript: log.transcript,
+          },
+        });
+        if (log.summary) {
+          turns.push({
+            ts: log.created_at,
+            turn: {
+              kind: 'ai-summary',
+              id: `log-${log.id}-ai`,
+              summary: log.summary,
+              mood: log.mood ?? '',
+              medicationsNoted: log.medications_noted ?? [],
+              urgent: !!log.urgent,
+            },
+          });
+        }
+      }
+      for (const report of reportsRes.data ?? []) {
+        turns.push({
+          ts: report.created_at,
+          turn: {
+            kind: 'report',
+            id: `report-turn-${report.id}`,
+            reportId: report.id,
+            patientName: report.patient_name,
+            visitDate: report.visit_date,
+            visitTime: report.visit_time,
+          },
+        });
+      }
+      turns.sort((a, b) => a.ts.localeCompare(b.ts));
+      if (turns.length > 0) setConversation(turns.map((t) => t.turn));
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [activePatientId]);
+
   async function persistLog(
     transcript: string,
     summary: Awaited<ReturnType<typeof api.summarize>>,
