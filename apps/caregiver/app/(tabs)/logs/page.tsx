@@ -10,11 +10,14 @@ import {
   PatientSwitcher,
   AudioBubble,
   TaskCard,
+  ChatBubble,
   IconSearch,
   IconChatswitch,
   IconMicrophoneFilled,
   IconKeyboard,
   IconPlus,
+  IconMicrophone,
+  IconArrowUp,
 } from '@alio/ui';
 import {
   INITIAL_CONVERSATION,
@@ -31,6 +34,8 @@ export default function LogsPage() {
   const [transcript, setTranscript] = useState('');
   const [conversation, setConversation] = useState<ConversationTurn[]>(INITIAL_CONVERSATION);
   const [activePatientId, setActivePatientId] = useState(SAMPLE_PATIENTS[0].id);
+  const [keyboardOpen, setKeyboardOpen] = useState(false);
+  const [draft, setDraft] = useState('');
 
   // Simulated transcript stream during recording
   useEffect(() => {
@@ -48,7 +53,23 @@ export default function LogsPage() {
   }, [view]);
 
   const handlePressToSpeak = () => {
+    setKeyboardOpen(false);
     setView('voice-recording');
+  };
+
+  // Typed text from the keyboard input renders as a plain user-text bubble
+  // (not the audio waveform). Then drop into message view.
+  const handleSendText = () => {
+    const text = draft.trim();
+    if (!text) return;
+    const ts = Date.now();
+    setConversation((prev) => [
+      ...prev,
+      { kind: 'user-text', id: `turn-${ts}`, text },
+    ]);
+    setDraft('');
+    setKeyboardOpen(false);
+    setView('message');
   };
 
   // Pressing Done saves the recording to the conversation BUT stays in voice mode.
@@ -129,21 +150,73 @@ export default function LogsPage() {
         <MessageView turns={conversation} />
       )}
 
-      {/* Bottom action bar — present in all states.
-       * Sits closer to the tab bar than before — gap is now ~12px instead of 40px. */}
-      <div className="absolute bottom-[95px] left-[25px] right-[25px] z-10 flex items-center justify-between">
-        <IconBox size={48} aria-label="Open keyboard">
-          <IconKeyboard className="size-6 text-gray-100" />
-        </IconBox>
-        {view === 'voice-recording' ? (
-          <PressToSpeakButton variant="recording" onClick={handleDone} className="w-[216px]" />
-        ) : (
-          <PressToSpeakButton variant="idle" onClick={handlePressToSpeak} className="w-[216px]" />
-        )}
-        <IconBox size={48} aria-label="More actions">
-          <IconPlus className="size-6 text-gray-100" />
-        </IconBox>
-      </div>
+      {/* Bottom bar.
+       *
+       * - message view OR keyboardOpen → text input bar (same shape as the
+       *   family AI message-mode input). Mic icon inside the input closes
+       *   the keyboard and returns to the voice action bar.
+       * - default voice mode → [Keyboard] [Press to Speak / Done] [Plus]
+       */}
+      {view === 'message' || keyboardOpen ? (
+        <div className="absolute bottom-[95px] left-[16px] right-[16px] z-10 flex items-center gap-[10px]">
+          <div className="flex h-[44px] flex-1 items-center gap-[8px] rounded-full bg-white px-[14px] shadow-sm">
+            <input
+              type="text"
+              value={draft}
+              onChange={(e) => setDraft(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') handleSendText();
+              }}
+              placeholder="Type a note..."
+              className="flex-1 bg-transparent text-[14px] text-gray-100 placeholder:text-gray-60 outline-none"
+            />
+            <button
+              type="button"
+              aria-label={keyboardOpen ? 'Back to voice mode' : 'Voice input'}
+              onClick={keyboardOpen ? () => setKeyboardOpen(false) : undefined}
+              className={`flex size-[24px] items-center justify-center ${
+                keyboardOpen ? 'text-brand-primary' : 'text-gray-60'
+              }`}
+            >
+              <IconMicrophone className="size-[18px]" />
+            </button>
+            <button
+              type="button"
+              aria-label="Send"
+              onClick={handleSendText}
+              disabled={!draft.trim()}
+              className="flex size-[28px] items-center justify-center rounded-full bg-brand-primary transition-transform active:scale-95 disabled:opacity-50"
+            >
+              <IconArrowUp className="size-[16px] text-white" />
+            </button>
+          </div>
+          <button
+            type="button"
+            aria-label="More actions"
+            className="flex size-[44px] items-center justify-center rounded-[12px] bg-white shadow-sm transition-colors active:bg-brand-tint-1"
+          >
+            <IconPlus className="size-[22px] text-gray-100" />
+          </button>
+        </div>
+      ) : (
+        <div className="absolute bottom-[95px] left-[25px] right-[25px] z-10 flex items-center justify-between">
+          <IconBox
+            size={48}
+            aria-label="Open keyboard"
+            onClick={() => setKeyboardOpen(true)}
+          >
+            <IconKeyboard className="size-6 text-gray-100" />
+          </IconBox>
+          {view === 'voice-recording' ? (
+            <PressToSpeakButton variant="recording" onClick={handleDone} className="w-[216px]" />
+          ) : (
+            <PressToSpeakButton variant="idle" onClick={handlePressToSpeak} className="w-[216px]" />
+          )}
+          <IconBox size={48} aria-label="More actions">
+            <IconPlus className="size-6 text-gray-100" />
+          </IconBox>
+        </div>
+      )}
     </div>
   );
 }
@@ -205,17 +278,27 @@ function MessageView({ turns }: { turns: ConversationTurn[] }) {
       className="absolute left-0 right-0 top-[122px] bottom-[170px] overflow-y-auto px-4 py-2"
     >
       <div className="flex flex-col gap-3">
-        {turns.map((turn) =>
-          turn.kind === 'user-audio' ? (
-            <AudioBubble
-              key={turn.id}
-              time={turn.time}
-              transcript={turn.transcript}
-            />
-          ) : (
-            <TaskCard key={turn.id} intro={turn.intro} tasks={turn.tasks} />
-          ),
-        )}
+        {turns.map((turn) => {
+          if (turn.kind === 'user-audio') {
+            return (
+              <AudioBubble
+                key={turn.id}
+                time={turn.time}
+                transcript={turn.transcript}
+              />
+            );
+          }
+          if (turn.kind === 'user-text') {
+            // Typed text from the keyboard input → plain text bubble
+            return (
+              <ChatBubble
+                key={turn.id}
+                message={{ id: turn.id, sender: 'me', text: turn.text }}
+              />
+            );
+          }
+          return <TaskCard key={turn.id} intro={turn.intro} tasks={turn.tasks} />;
+        })}
       </div>
     </div>
   );

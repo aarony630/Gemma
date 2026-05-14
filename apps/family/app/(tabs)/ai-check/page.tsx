@@ -39,6 +39,7 @@ export default function FamilyAICheckPage() {
   const [conversation, setConversation] = useState<ChatMessage[]>(SAMPLE_AI_CONVERSATION);
   const [draft, setDraft] = useState('');
   const [uploadOpen, setUploadOpen] = useState(false);
+  const [keyboardOpen, setKeyboardOpen] = useState(false);
 
   // Mode derived from view (recording is still "voice" mode for the dropdown)
   const mode: LogsMode = view === 'message' ? 'message' : 'voice';
@@ -92,7 +93,14 @@ export default function FamilyAICheckPage() {
       { id: `m-${Date.now()}`, sender: 'me', text },
     ]);
     setDraft('');
+    // After sending from voice mode's keyboard input, drop into message view
+    if (view !== 'message') {
+      setKeyboardOpen(false);
+      setView('message');
+    }
   };
+
+  const handleCloseKeyboard = () => setKeyboardOpen(false);
 
   const handleUploadPick = (kind: UploadKind) => {
     // For the prototype we just close the wheel + append a placeholder message.
@@ -138,10 +146,32 @@ export default function FamilyAICheckPage() {
         <MessageView turns={conversation} />
       )}
 
-      {/* Bottom — Press to Speak (voice modes) OR text input (message mode) + Plus/UploadWheel */}
-      {view !== 'message' ? (
+      {/* Bottom bar.
+       *
+       * Three states (in priority order):
+       *   1) view === 'message' → text input (with mic = decorative, send = submit)
+       *   2) view !== 'message' && keyboardOpen → text input (with mic = close-keyboard
+       *      to return to the voice action bar)
+       *   3) default voice mode → [Keyboard] [Press to Speak / Done] [Plus]
+       */}
+      {view === 'message' || keyboardOpen ? (
+        <MessageInput
+          value={draft}
+          onChange={setDraft}
+          onSend={handleSendText}
+          onMicClick={keyboardOpen ? handleCloseKeyboard : undefined}
+          uploadOpen={uploadOpen}
+          onOpenUpload={() => setUploadOpen(true)}
+          onCloseUpload={() => setUploadOpen(false)}
+          onUploadPick={handleUploadPick}
+        />
+      ) : (
         <div className="absolute bottom-[95px] left-[25px] right-[25px] z-10 flex items-center justify-between">
-          <IconBox size={48} aria-label="Open keyboard">
+          <IconBox
+            size={48}
+            aria-label="Open keyboard"
+            onClick={() => setKeyboardOpen(true)}
+          >
             <IconKeyboard className="size-6 text-gray-100" />
           </IconBox>
           {view === 'voice-recording' ? (
@@ -171,16 +201,6 @@ export default function FamilyAICheckPage() {
             )}
           </div>
         </div>
-      ) : (
-        <MessageInput
-          value={draft}
-          onChange={setDraft}
-          onSend={handleSendText}
-          uploadOpen={uploadOpen}
-          onOpenUpload={() => setUploadOpen(true)}
-          onCloseUpload={() => setUploadOpen(false)}
-          onUploadPick={handleUploadPick}
-        />
       )}
     </div>
   );
@@ -254,6 +274,7 @@ function MessageInput({
   value,
   onChange,
   onSend,
+  onMicClick,
   uploadOpen,
   onOpenUpload,
   onCloseUpload,
@@ -262,6 +283,10 @@ function MessageInput({
   value: string;
   onChange: (v: string) => void;
   onSend: () => void;
+  /** Optional. When provided, the mic icon inside the input bar becomes a
+   * "back to voice mode" toggle (used when keyboard was opened from voice
+   * mode). When omitted, the icon is decorative. */
+  onMicClick?: () => void;
   uploadOpen: boolean;
   onOpenUpload: () => void;
   onCloseUpload: () => void;
@@ -283,8 +308,9 @@ function MessageInput({
         />
         <button
           type="button"
-          aria-label="Voice input"
-          className="flex size-[24px] items-center justify-center text-gray-60"
+          aria-label={onMicClick ? 'Back to voice mode' : 'Voice input'}
+          onClick={onMicClick}
+          className={`flex size-[24px] items-center justify-center ${onMicClick ? 'text-brand-primary' : 'text-gray-60'}`}
         >
           <IconMicrophone className="size-[18px]" />
         </button>
