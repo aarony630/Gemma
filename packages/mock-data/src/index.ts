@@ -115,7 +115,7 @@ export const SAMPLE_PATIENTS: Patient[] = [
     time: '10:00 AM',
     address: '1234 Maple St',
     fullAddress: '1234 Maple St, Portland, OR',
-    avatarUrl: '/avatars/person1.avif',
+    avatarUrl: '/avatars/elder1.png',
     emergencyContacts: [
       { id: 'c1', name: 'Janet Chen', relation: 'Daughter', phone: '(503) 555-0192' },
       { id: 'c2', name: 'Robert Chen', relation: 'Son', phone: '(503) 555-0192' },
@@ -127,7 +127,7 @@ export const SAMPLE_PATIENTS: Patient[] = [
     time: '10:00 AM',
     address: '1234 Maple St',
     fullAddress: '1234 Maple St, Portland, OR',
-    avatarUrl: '/avatars/person2.webp',
+    avatarUrl: '/avatars/elder2.avif',
     emergencyContacts: [
       { id: 'c1', name: 'Patricia Williams', relation: 'Daughter', phone: '(503) 555-0123' },
     ],
@@ -138,7 +138,7 @@ export const SAMPLE_PATIENTS: Patient[] = [
     time: '4:00 PM',
     address: '890 Pine Blvd',
     fullAddress: '890 Pine Blvd, Portland, OR',
-    avatarUrl: '/avatars/person3.avif',
+    avatarUrl: '/avatars/elder3.webp',
     emergencyContacts: [
       { id: 'c1', name: 'Mary Foster', relation: 'Wife', phone: '(503) 555-0145' },
     ],
@@ -152,6 +152,34 @@ export const SAMPLE_CG_USER = {
   role: 'Caregiver' as const,
   avatarUrl: '/avatars/nurse.png',
   notifications: 2,
+};
+
+// =============================================================
+// Medical records (Family Records tab)
+// =============================================================
+
+export type RecordType = 'Lab report' | 'Prescription' | 'Other';
+
+export type MedicalRecord = {
+  id: string;
+  title: string;
+  type: RecordType;
+  date: string; // "May 02, 2026"
+};
+
+export const SAMPLE_RECORDS: MedicalRecord[] = [
+  { id: 'r1', title: 'Cardiology Follow-up',   type: 'Lab report',   date: 'May 02, 2026' },
+  { id: 'r2', title: 'Metformin 150mg',         type: 'Prescription', date: 'May 01, 2026' },
+  { id: 'r3', title: 'Physical Therapy Plan',   type: 'Other',        date: 'Mar 03, 2026' },
+  { id: 'r4', title: 'HbA1c Test',              type: 'Lab report',   date: 'May 02, 2026' },
+  { id: 'r5', title: 'Ibuprofen 150mg',         type: 'Prescription', date: 'May 01, 2026' },
+  { id: 'r6', title: 'Blood Pressure Log',      type: 'Lab report',   date: 'April 22, 2026' },
+];
+
+export const RECORDS_OWNER = {
+  label: "Dr. Harold's Records",
+  countLabel: '6 records on file',
+  syncStatus: 'Synced' as const,
 };
 
 // =============================================================
@@ -345,7 +373,7 @@ export const SAMPLE_AI_CONVERSATION: ChatMessage[] = [
     id: 'a1',
     sender: 'me',
     text: 'Dorothy seems to have some side effect on the drugs',
-    imageUrl: '/avatars/person1.avif',
+    imageUrl: '/chat/hand-closeup.jpg',
   },
   {
     id: 'a2',
@@ -353,6 +381,83 @@ export const SAMPLE_AI_CONVERSATION: ChatMessage[] = [
     text: 'Got it. Included in daily report. Do you want me to generate more specific medical influence summary?',
   },
 ];
+
+// =============================================================
+// Family-side chat — same data shape, different cast of contacts
+// (the user is a family member; their threads are with the caregiver,
+//  other family members, and a doctor).
+// =============================================================
+
+export const SAMPLE_FM_CHAT_THREADS: ChatThread[] = [
+  {
+    id: 'sarah-caregiver',
+    name: 'Sarah Mitchell',
+    lastMessage: 'Just finished morning meds, all good!',
+    timestamp: '11:24AM',
+    unreadCount: 1,
+    pinned: true,
+    status: 'online',
+    avatarUrl: '/avatars/nurse.png',
+  },
+  {
+    id: 'dorothy-circle',
+    name: "Dorothy's Care Circle",
+    lastMessage: "Janet: Will visit Sunday",
+    timestamp: '10:42AM',
+    unreadCount: 3,
+    isGroup: true,
+    avatarUrl: '/avatars/elder1.png',
+    groupAvatars: ['/avatars/elder1.png', '/avatars/nurse.png', '/avatars/person1.avif'],
+  },
+  {
+    id: 'dr-rowan',
+    name: 'Dr. Rowan',
+    lastMessage: 'Following up on the test results',
+    timestamp: '9:18AM',
+    unreadCount: 1,
+    avatarUrl: '/avatars/person4.avif',
+  },
+  {
+    id: 'patricia',
+    name: 'Patricia Williams',
+    lastMessage: 'Patricia is typing...',
+    timestamp: '8:55AM',
+    unreadCount: 0,
+    isTyping: true,
+    avatarUrl: '/avatars/person2.webp',
+  },
+  {
+    id: 'janet',
+    name: 'Janet Chen',
+    lastMessage: 'Mom seems happier today',
+    timestamp: 'Yesterday',
+    unreadCount: 0,
+    avatarUrl: '/avatars/person1.avif',
+  },
+];
+
+export const SAMPLE_FM_CONVERSATIONS: Record<string, ChatMessage[]> = {
+  'sarah-caregiver': [
+    { id: 'fm-m1', sender: 'them', text: 'Good morning! Just arrived at the house.' },
+    { id: 'fm-m2', sender: 'me',   text: 'Thanks Sarah! How is mom doing today?' },
+    { id: 'fm-m3', sender: 'them', text: 'She is in good spirits. BP looks normal — 120/80.' },
+    { id: 'fm-m4', sender: 'me',   text: 'Wonderful. Could you make sure she takes her morning meds?' },
+    { id: 'fm-m5', sender: 'them', text: 'Just finished morning meds, all good!' },
+  ],
+  'dorothy-circle': [
+    { id: 'fm-d1', sender: 'them', text: 'Sarah: Dorothy had a great morning today 🌞' },
+    { id: 'fm-d2', sender: 'me',   text: "That's wonderful to hear!" },
+    { id: 'fm-d3', sender: 'them', text: 'Janet: Will visit Sunday' },
+  ],
+  'dr-rowan': [
+    { id: 'fm-r1', sender: 'them', text: 'Following up on the test results from last week.' },
+    { id: 'fm-r2', sender: 'them', text: 'Everything looks within normal range — I want to schedule a follow-up in 4 weeks.' },
+  ],
+  janet: [
+    { id: 'fm-j1', sender: 'them', text: 'Mom seems happier today' },
+    { id: 'fm-j2', sender: 'me',   text: 'I noticed too — the new physical therapy plan might be helping.' },
+  ],
+};
 
 /** Sample conversation per thread. Defaults to a "no messages yet" empty state. */
 export const SAMPLE_CONVERSATIONS: Record<string, ChatMessage[]> = {

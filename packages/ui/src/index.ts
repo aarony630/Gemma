@@ -24,5 +24,9 @@ export { ChatBubble } from './ChatBubble';
 export { PatientCard } from './PatientCard';
 export { PatientSwitcher } from './PatientSwitcher';
 
+// Records (Family Records tab)
+export { RecordItem } from './RecordItem';
+export { AddRecordModal } from './AddRecordModal';
+
 // Caesarzkn icons — 288 generated icon components + custom
 export * from './icons';

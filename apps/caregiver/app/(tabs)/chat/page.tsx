@@ -20,7 +20,7 @@ export default function CaregiverChatPage() {
     >
       {/* Top header — "Chat" pill + Search + chat-list icons */}
       <header className="absolute left-[25px] right-[25px] top-[60px] z-10 flex items-center justify-between">
-        <span className="flex h-[42px] items-center rounded-[10px] bg-brand-tint-1 px-[12px] text-[16px] font-bold text-black">
+        <span className="flex h-[42px] items-center rounded-[10px] bg-brand-tint-1 px-[12px] text-[20px] font-bold text-black">
           Chat
         </span>
         <div className="flex items-center gap-[12px]">

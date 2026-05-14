@@ -125,7 +125,7 @@ export default function FamilyAICheckPage() {
       {view !== 'message' ? (
         <div className="absolute bottom-[95px] left-[25px] right-[25px] z-10 flex items-center justify-between">
           <IconBox size={48} aria-label="Open keyboard">
-            <IconKeyboard className="size-6 text-brand-primary" />
+            <IconKeyboard className="size-6 text-gray-100" />
           </IconBox>
           {view === 'voice-recording' ? (
             <PressToSpeakButton variant="recording" onClick={handleDone} className="w-[216px]" />
