@@ -11,7 +11,8 @@ import {
   AudioBubble,
   TaskCard,
   IconSearch,
-  IconChat,
+  IconChatswitch,
+  IconMicrophoneFilled,
   IconKeyboard,
   IconPlus,
 } from '@alio/ui';
@@ -101,13 +102,23 @@ export default function LogsPage() {
           <IconBox size={42} aria-label="Search">
             <IconSearch className="size-6 text-gray-100" />
           </IconBox>
-          <IconBox
-            size={42}
-            aria-label="Open chat history"
-            onClick={() => router.push('/logs/history')}
+          {/* Mode-switch button — toggles voice ↔ message.
+           * Voice mode  → shows IconChatswitch  → tap goes to message view.
+           * Message mode → shows microphone icon → tap goes back to voice. */}
+          <button
+            type="button"
+            aria-label={
+              view === 'message' ? 'Switch to voice mode' : 'Switch to message mode'
+            }
+            onClick={() => setView(view === 'message' ? 'voice-idle' : 'message')}
+            className="flex size-[42px] items-center justify-center rounded-[12px] bg-brand-primary transition-transform active:scale-95"
           >
-            <IconChat className="size-6 text-gray-100" />
-          </IconBox>
+            {view === 'message' ? (
+              <IconMicrophoneFilled className="size-6 text-white" />
+            ) : (
+              <IconChatswitch className="size-6 text-white" />
+            )}
+          </button>
         </div>
       </header>
 
@@ -142,13 +153,15 @@ function VoiceView({ view, transcript }: { view: View; transcript: string }) {
   const recording = view === 'voice-recording';
   return (
     <>
-      {/* "Hi, I am listening" — animated gradient when recording, static gradient idle */}
+      {/* "Hi, I am listening" — pure purple → pink gradient. Static (idle)
+       * goes dark indigo → brand purple → light pink; recording animates the
+       * same palette by sliding `background-position` across a 300%-wide grad. */}
       <p
         className={clsx(
           'absolute left-1/2 top-[180px] -translate-x-1/2 whitespace-nowrap bg-clip-text text-xl font-bold text-transparent',
           recording
-            ? 'animate-[listening-gradient_3.6s_ease-in-out_infinite] bg-[length:300%_100%] bg-[linear-gradient(90deg,#1F2782_0%,#6F7FF5_25%,#F472B6_50%,#C0DA5A_75%,#1F2782_100%)]'
-            : 'bg-gradient-to-r from-[#1F2782] from-[45%] to-[#6F7FF5]/70',
+            ? 'animate-[listening-gradient_3.6s_ease-in-out_infinite] bg-[length:300%_100%] bg-[linear-gradient(90deg,#2B1B72_0%,#5E69F6_22%,#A29BFE_45%,#F4B6C8_60%,#D496F5_78%,#2B1B72_100%)]'
+            : 'bg-gradient-to-r from-[#2B1B72] from-[10%] via-[#5E69F6] via-[55%] to-[#F4B6C8] to-[100%]',
         )}
       >
         Hi, I am listening
