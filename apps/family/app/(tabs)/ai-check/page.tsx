@@ -7,18 +7,19 @@ import {
   IconBox,
   PressToSpeakButton,
   GradientBlob,
-  PatientSwitcher,
+  ModeDropdown,
   ChatBubble,
+  UploadWheel,
   IconSearch,
   IconChat,
   IconKeyboard,
   IconPlus,
   IconMicrophone,
   IconArrowUp,
-  IconChevronDown,
+  type LogsMode,
+  type UploadKind,
 } from '@alio/ui';
 import {
-  SAMPLE_PATIENTS,
   SAMPLE_AI_CONVERSATION,
   SIMULATED_TRANSCRIPT,
   type ChatMessage,
@@ -27,20 +28,21 @@ import {
 type View = 'voice-idle' | 'voice-recording' | 'message';
 
 /**
- * Family AI Check — voice + message + image recognition.
- * Migrates the Caregiver Logs flow with two key Family-side additions:
- *   1) Top-left switches between "Alio voice ▾" (voice mode) and the active
- *      patient (e.g., "Dorothy Chen ▾") in message mode.
- *   2) Message mode has a TEXT INPUT bar (not just Press to Speak) so families
- *      can type questions or send images for AI to recognize.
+ * Family AI Check — voice + recording + message + image recognition + upload wheel.
+ * Top-left "Alio voice ▾" / "Alio message ▾" dropdown switches view mode.
+ * Bottom "+" button opens a vertical UploadWheel (mic, photo, camera).
  */
 export default function FamilyAICheckPage() {
   const router = useRouter();
   const [view, setView] = useState<View>('voice-idle');
   const [transcript, setTranscript] = useState('');
   const [conversation, setConversation] = useState<ChatMessage[]>(SAMPLE_AI_CONVERSATION);
-  const [activePatientId, setActivePatientId] = useState(SAMPLE_PATIENTS[0].id);
   const [draft, setDraft] = useState('');
+  const [uploadOpen, setUploadOpen] = useState(false);
+  const [keyboardOpen, setKeyboardOpen] = useState(false);
+
+  // Mode derived from view (recording is still "voice" mode for the dropdown)
+  const mode: LogsMode = view === 'message' ? 'message' : 'voice';
 
   // Simulated transcript stream during recording
   useEffect(() => {
@@ -57,7 +59,16 @@ export default function FamilyAICheckPage() {
     return () => clearInterval(id);
   }, [view]);
 
-  const handlePressToSpeak = () => setView('voice-recording');
+  const handleChangeMode = (next: LogsMode) => {
+    setUploadOpen(false);
+    if (next === 'voice') setView('voice-idle');
+    else setView('message');
+  };
+
+  const handlePressToSpeak = () => {
+    setUploadOpen(false);
+    setView('voice-recording');
+  };
 
   const handleDone = () => {
     const newMessage: ChatMessage = {
@@ -68,7 +79,7 @@ export default function FamilyAICheckPage() {
     const aiReply: ChatMessage = {
       id: `m-${Date.now()}-ai`,
       sender: 'them',
-      text: 'Got it. Logged and analyzed against Dorothy\'s recent vitals.',
+      text: "Got it. Logged and analyzed against Dorothy's recent vitals.",
     };
     setConversation((prev) => [...prev, newMessage, aiReply]);
     setView('message');
@@ -82,6 +93,29 @@ export default function FamilyAICheckPage() {
       { id: `m-${Date.now()}`, sender: 'me', text },
     ]);
     setDraft('');
+    // After sending from voice mode's keyboard input, drop into message view
+    if (view !== 'message') {
+      setKeyboardOpen(false);
+      setView('message');
+    }
+  };
+
+  const handleCloseKeyboard = () => setKeyboardOpen(false);
+
+  const handleUploadPick = (kind: UploadKind) => {
+    // For the prototype we just close the wheel + append a placeholder message.
+    setUploadOpen(false);
+    const labels: Record<UploadKind, string> = {
+      voice:  '🎤 [voice note attached]',
+      photo:  '🖼 [photo attached]',
+      camera: '📷 [camera capture attached]',
+    };
+    setConversation((prev) => [
+      ...prev,
+      { id: `m-${Date.now()}`, sender: 'me', text: labels[kind] },
+    ]);
+    // Drop into message mode so the new attachment is visible
+    setView('message');
   };
 
   return (
@@ -92,18 +126,9 @@ export default function FamilyAICheckPage() {
           'linear-gradient(135deg, #E3E5F1 0%, #EAEAF2 50%, #D3D5EC 100%)',
       }}
     >
-      {/* Top bar — switches between "Alio voice ▾" (voice modes) and Patient name (message) */}
+      {/* Top bar — "Alio voice ▾" / "Alio message ▾" mode switcher + right icons */}
       <header className="absolute left-[25px] right-[25px] top-[60px] z-10 flex items-center justify-between gap-3">
-        {view === 'message' ? (
-          <PatientSwitcher
-            patients={SAMPLE_PATIENTS}
-            activeId={activePatientId}
-            onChange={setActivePatientId}
-          />
-        ) : (
-          <AlioVoicePill />
-        )}
-
+        <ModeDropdown mode={mode} onChangeMode={handleChangeMode} />
         <div className="flex items-center gap-3">
           <IconBox size={42} aria-label="Search">
             <IconSearch className="size-6 text-gray-100" />
@@ -121,10 +146,32 @@ export default function FamilyAICheckPage() {
         <MessageView turns={conversation} />
       )}
 
-      {/* Bottom — Press to Speak (voice modes) OR text input (message mode) */}
-      {view !== 'message' ? (
+      {/* Bottom bar.
+       *
+       * Three states (in priority order):
+       *   1) view === 'message' → text input (with mic = decorative, send = submit)
+       *   2) view !== 'message' && keyboardOpen → text input (with mic = close-keyboard
+       *      to return to the voice action bar)
+       *   3) default voice mode → [Keyboard] [Press to Speak / Done] [Plus]
+       */}
+      {view === 'message' || keyboardOpen ? (
+        <MessageInput
+          value={draft}
+          onChange={setDraft}
+          onSend={handleSendText}
+          onMicClick={keyboardOpen ? handleCloseKeyboard : undefined}
+          uploadOpen={uploadOpen}
+          onOpenUpload={() => setUploadOpen(true)}
+          onCloseUpload={() => setUploadOpen(false)}
+          onUploadPick={handleUploadPick}
+        />
+      ) : (
         <div className="absolute bottom-[95px] left-[25px] right-[25px] z-10 flex items-center justify-between">
-          <IconBox size={48} aria-label="Open keyboard">
+          <IconBox
+            size={48}
+            aria-label="Open keyboard"
+            onClick={() => setKeyboardOpen(true)}
+          >
             <IconKeyboard className="size-6 text-gray-100" />
           </IconBox>
           {view === 'voice-recording' ? (
@@ -132,33 +179,30 @@ export default function FamilyAICheckPage() {
           ) : (
             <PressToSpeakButton variant="idle" onClick={handlePressToSpeak} className="w-[216px]" />
           )}
-          <IconBox size={48} aria-label="More actions">
-            <IconPlus className="size-6 text-gray-100" />
-          </IconBox>
+
+          {/* Plus button + UploadWheel anchored to the right edge */}
+          <div className="relative">
+            {uploadOpen ? (
+              <UploadWheel
+                open={uploadOpen}
+                onClose={() => setUploadOpen(false)}
+                onPick={handleUploadPick}
+                className="bottom-0 right-0"
+              />
+            ) : (
+              <button
+                type="button"
+                aria-label="More actions"
+                onClick={() => setUploadOpen(true)}
+                className="flex size-[48px] items-center justify-center rounded-lg bg-brand-tint-1 transition-colors active:bg-brand-border"
+              >
+                <IconPlus className="size-6 text-gray-100" />
+              </button>
+            )}
+          </div>
         </div>
-      ) : (
-        <MessageInput
-          value={draft}
-          onChange={setDraft}
-          onSend={handleSendText}
-        />
       )}
     </div>
-  );
-}
-
-// ----- Top-left pills ------------------------------------------------------
-
-function AlioVoicePill() {
-  return (
-    <button
-      type="button"
-      className="flex h-[42px] items-center gap-2 rounded-[10px] bg-brand-tint-1 px-3 transition-colors active:bg-brand-border"
-    >
-      <span className="text-xl font-bold text-gray-100">Alio</span>
-      <span className="text-md text-gray-100">voice</span>
-      <IconChevronDown className="size-4 text-gray-100" strokeWidth={2.2} />
-    </button>
   );
 }
 
@@ -171,9 +215,13 @@ function VoiceView({ view, transcript }: { view: View; transcript: string }) {
       <p
         className={clsx(
           'absolute left-1/2 top-[180px] -translate-x-1/2 whitespace-nowrap bg-clip-text text-xl font-bold text-transparent',
+          // Purple → pink only: dark deep indigo at the ends, brand purple,
+          // soft lavender, then light pastel pink as the brightest stop.
+          // Varying lightness + saturation produces the "saturation pulse"
+          // without leaving the purple/pink family.
           recording
-            ? 'animate-[listening-gradient_3.6s_ease-in-out_infinite] bg-[length:300%_100%] bg-[linear-gradient(90deg,#1F2782_0%,#6F7FF5_25%,#F472B6_50%,#C0DA5A_75%,#1F2782_100%)]'
-            : 'bg-gradient-to-r from-[#1F2782] from-[45%] to-[#6F7FF5]/70',
+            ? 'animate-[listening-gradient_3.6s_ease-in-out_infinite] bg-[length:300%_100%] bg-[linear-gradient(90deg,#2B1B72_0%,#5E69F6_22%,#A29BFE_45%,#F4B6C8_60%,#D496F5_78%,#2B1B72_100%)]'
+            : 'bg-gradient-to-r from-[#2B1B72] from-[10%] via-[#5E69F6] via-[55%] to-[#F4B6C8] to-[100%]',
         )}
       >
         Hi, I am listening
@@ -199,7 +247,7 @@ function VoiceView({ view, transcript }: { view: View; transcript: string }) {
   );
 }
 
-// ----- Message view (conversation with image-recognition support) ----------
+// ----- Message view (conversation with image recognition + attachments) ---
 
 function MessageView({ turns }: { turns: ChatMessage[] }) {
   const scrollRef = useRef<HTMLDivElement | null>(null);
@@ -220,16 +268,29 @@ function MessageView({ turns }: { turns: ChatMessage[] }) {
   );
 }
 
-// ----- Message-mode input bar ----------------------------------------------
+// ----- Message-mode input bar (with the same upload wheel) -----------------
 
 function MessageInput({
   value,
   onChange,
   onSend,
+  onMicClick,
+  uploadOpen,
+  onOpenUpload,
+  onCloseUpload,
+  onUploadPick,
 }: {
   value: string;
   onChange: (v: string) => void;
   onSend: () => void;
+  /** Optional. When provided, the mic icon inside the input bar becomes a
+   * "back to voice mode" toggle (used when keyboard was opened from voice
+   * mode). When omitted, the icon is decorative. */
+  onMicClick?: () => void;
+  uploadOpen: boolean;
+  onOpenUpload: () => void;
+  onCloseUpload: () => void;
+  onUploadPick: (kind: UploadKind) => void;
 }) {
   const hasText = value.trim().length > 0;
   return (
@@ -247,8 +308,9 @@ function MessageInput({
         />
         <button
           type="button"
-          aria-label="Voice input"
-          className="flex size-[24px] items-center justify-center text-gray-60"
+          aria-label={onMicClick ? 'Back to voice mode' : 'Voice input'}
+          onClick={onMicClick}
+          className={`flex size-[24px] items-center justify-center ${onMicClick ? 'text-brand-primary' : 'text-gray-60'}`}
         >
           <IconMicrophone className="size-[18px]" />
         </button>
@@ -262,13 +324,25 @@ function MessageInput({
           <IconArrowUp className="size-[16px] text-white" />
         </button>
       </div>
-      <button
-        type="button"
-        aria-label="More actions"
-        className="flex size-[44px] items-center justify-center rounded-[12px] bg-white shadow-sm transition-colors active:bg-brand-tint-1"
-      >
-        <IconPlus className="size-[22px] text-gray-100" />
-      </button>
+      <div className="relative">
+        {uploadOpen ? (
+          <UploadWheel
+            open={uploadOpen}
+            onClose={onCloseUpload}
+            onPick={onUploadPick}
+            className="bottom-0 right-0"
+          />
+        ) : (
+          <button
+            type="button"
+            aria-label="More actions"
+            onClick={onOpenUpload}
+            className="flex size-[44px] items-center justify-center rounded-[12px] bg-white shadow-sm transition-colors active:bg-brand-tint-1"
+          >
+            <IconPlus className="size-[22px] text-gray-100" />
+          </button>
+        )}
+      </div>
     </div>
   );
 }

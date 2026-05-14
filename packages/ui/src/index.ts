@@ -28,5 +28,8 @@ export { PatientSwitcher } from './PatientSwitcher';
 export { RecordItem } from './RecordItem';
 export { AddRecordModal } from './AddRecordModal';
 
+// Upload wheel — floating attachment picker for AI / chat screens
+export { UploadWheel, type UploadKind } from './UploadWheel';
+
 // Caesarzkn icons — 288 generated icon components + custom
 export * from './icons';

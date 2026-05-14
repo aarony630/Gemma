@@ -10,10 +10,14 @@ import {
   PatientSwitcher,
   AudioBubble,
   TaskCard,
+  ChatBubble,
   IconSearch,
-  IconChat,
+  IconChatswitch,
+  IconMicrophoneFilled,
   IconKeyboard,
   IconPlus,
+  IconMicrophone,
+  IconArrowUp,
 } from '@alio/ui';
 import {
   INITIAL_CONVERSATION,
@@ -33,6 +37,8 @@ export default function LogsPage() {
   const [conversation, setConversation] = useState<ConversationTurn[]>(INITIAL_CONVERSATION);
   const [activePatientId, setActivePatientId] = useState(SAMPLE_PATIENTS[0].id);
   const [error, setError] = useState('');
+  const [keyboardOpen, setKeyboardOpen] = useState(false);
+  const [draft, setDraft] = useState('');
 
   const recorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
@@ -69,7 +75,19 @@ export default function LogsPage() {
     recorderRef.current.stop();
     recorderRef.current.stream.getTracks().forEach((t) => t.stop());
     setRecordState('transcribing');
-    // View stays 'voice-recording' visually until we resolve, then flips below.
+  }
+
+  function handleSendText() {
+    const text = draft.trim();
+    if (!text) return;
+    const ts = Date.now();
+    setConversation((prev) => [
+      ...prev,
+      { kind: 'user-text', id: `turn-${ts}`, text },
+    ]);
+    setDraft('');
+    setKeyboardOpen(false);
+    setView('message');
   }
 
   async function handleRecordingStop() {
@@ -133,13 +151,23 @@ export default function LogsPage() {
           <IconBox size={42} aria-label="Search">
             <IconSearch className="size-6 text-gray-100" />
           </IconBox>
-          <IconBox
-            size={42}
-            aria-label="Open chat history"
-            onClick={() => router.push('/logs/history')}
+          {/* Mode-switch button — toggles voice ↔ message.
+           * Voice mode  → shows IconChatswitch  → tap goes to message view.
+           * Message mode → shows microphone icon → tap goes back to voice. */}
+          <button
+            type="button"
+            aria-label={
+              view === 'message' ? 'Switch to voice mode' : 'Switch to message mode'
+            }
+            onClick={() => setView(view === 'message' ? 'voice-idle' : 'message')}
+            className="flex size-[42px] items-center justify-center rounded-[12px] bg-brand-primary transition-transform active:scale-95"
           >
-            <IconChat className="size-6 text-gray-100" />
-          </IconBox>
+            {view === 'message' ? (
+              <IconMicrophoneFilled className="size-6 text-white" />
+            ) : (
+              <IconChatswitch className="size-6 text-white" />
+            )}
+          </button>
         </div>
       </header>
 
@@ -154,27 +182,66 @@ export default function LogsPage() {
         <MessageView turns={conversation} />
       )}
 
-      <div className="absolute bottom-[95px] left-[25px] right-[25px] z-10 flex items-center justify-between">
-        <IconBox size={48} aria-label="Open keyboard">
-          <IconKeyboard className="size-6 text-gray-100" />
-        </IconBox>
-        {recording ? (
-          <PressToSpeakButton
-            variant="recording"
-            onClick={handleDone}
-            className="w-[216px]"
-          />
-        ) : (
-          <PressToSpeakButton
-            variant="idle"
-            onClick={handlePressToSpeak}
-            className="w-[216px]"
-          />
-        )}
-        <IconBox size={48} aria-label="More actions">
-          <IconPlus className="size-6 text-gray-100" />
-        </IconBox>
-      </div>
+      {view === 'message' || keyboardOpen ? (
+        <div className="absolute bottom-[95px] left-[16px] right-[16px] z-10 flex items-center gap-[10px]">
+          <div className="flex h-[44px] flex-1 items-center gap-[8px] rounded-full bg-white px-[14px] shadow-sm">
+            <input
+              type="text"
+              value={draft}
+              onChange={(e) => setDraft(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') handleSendText();
+              }}
+              placeholder="Type a note..."
+              className="flex-1 bg-transparent text-[14px] text-gray-100 placeholder:text-gray-60 outline-none"
+            />
+            <button
+              type="button"
+              aria-label={keyboardOpen ? 'Back to voice mode' : 'Voice input'}
+              onClick={keyboardOpen ? () => setKeyboardOpen(false) : undefined}
+              className={`flex size-[24px] items-center justify-center ${
+                keyboardOpen ? 'text-brand-primary' : 'text-gray-60'
+              }`}
+            >
+              <IconMicrophone className="size-[18px]" />
+            </button>
+            <button
+              type="button"
+              aria-label="Send"
+              onClick={handleSendText}
+              disabled={!draft.trim()}
+              className="flex size-[28px] items-center justify-center rounded-full bg-brand-primary transition-transform active:scale-95 disabled:opacity-50"
+            >
+              <IconArrowUp className="size-[16px] text-white" />
+            </button>
+          </div>
+          <button
+            type="button"
+            aria-label="More actions"
+            className="flex size-[44px] items-center justify-center rounded-[12px] bg-white shadow-sm transition-colors active:bg-brand-tint-1"
+          >
+            <IconPlus className="size-[22px] text-gray-100" />
+          </button>
+        </div>
+      ) : (
+        <div className="absolute bottom-[95px] left-[25px] right-[25px] z-10 flex items-center justify-between">
+          <IconBox
+            size={48}
+            aria-label="Open keyboard"
+            onClick={() => setKeyboardOpen(true)}
+          >
+            <IconKeyboard className="size-6 text-gray-100" />
+          </IconBox>
+          {recording ? (
+            <PressToSpeakButton variant="recording" onClick={handleDone} className="w-[216px]" />
+          ) : (
+            <PressToSpeakButton variant="idle" onClick={handlePressToSpeak} className="w-[216px]" />
+          )}
+          <IconBox size={48} aria-label="More actions">
+            <IconPlus className="size-6 text-gray-100" />
+          </IconBox>
+        </div>
+      )}
     </div>
   );
 }
@@ -196,8 +263,8 @@ function VoiceView({
         className={clsx(
           'absolute left-1/2 top-[180px] -translate-x-1/2 whitespace-nowrap bg-clip-text text-xl font-bold text-transparent',
           recording
-            ? 'animate-[listening-gradient_3.6s_ease-in-out_infinite] bg-[length:300%_100%] bg-[linear-gradient(90deg,#1F2782_0%,#6F7FF5_25%,#F472B6_50%,#C0DA5A_75%,#1F2782_100%)]'
-            : 'bg-gradient-to-r from-[#1F2782] from-[45%] to-[#6F7FF5]/70',
+            ? 'animate-[listening-gradient_3.6s_ease-in-out_infinite] bg-[length:300%_100%] bg-[linear-gradient(90deg,#2B1B72_0%,#5E69F6_22%,#A29BFE_45%,#F4B6C8_60%,#D496F5_78%,#2B1B72_100%)]'
+            : 'bg-gradient-to-r from-[#2B1B72] from-[10%] via-[#5E69F6] via-[55%] to-[#F4B6C8] to-[100%]',
         )}
       >
         {busyLabel || 'Hi, I am listening'}
@@ -236,7 +303,21 @@ function MessageView({ turns }: { turns: ConversationTurn[] }) {
       <div className="flex flex-col gap-3">
         {turns.map((turn) => {
           if (turn.kind === 'user-audio') {
-            return <AudioBubble key={turn.id} time={turn.time} transcript={turn.transcript} />;
+            return (
+              <AudioBubble
+                key={turn.id}
+                time={turn.time}
+                transcript={turn.transcript}
+              />
+            );
+          }
+          if (turn.kind === 'user-text') {
+            return (
+              <ChatBubble
+                key={turn.id}
+                message={{ id: turn.id, sender: 'me', text: turn.text }}
+              />
+            );
           }
           if (turn.kind === 'ai-tasks') {
             return <TaskCard key={turn.id} intro={turn.intro} tasks={turn.tasks} />;

@@ -20,6 +20,7 @@ export const SAMPLE_ELDER: Person = {
 
 export type ConversationTurn =
   | { kind: 'user-audio'; id: string; time: string; transcript: string }
+  | { kind: 'user-text'; id: string; text: string }
   | { kind: 'ai-tasks'; id: string; intro: string; tasks: { id: string; label: string; done: boolean }[] }
   | { kind: 'ai-summary'; id: string; summary: string; mood: string; medicationsNoted: string[]; urgent: boolean };
 
