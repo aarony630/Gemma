@@ -31,15 +31,16 @@ const CAREGIVER_ID = 'caregiver-001';
 const CAREGIVER_NAME = 'Sarah Mitchell';
 const threadIdFor = (patientId: string) => `${CAREGIVER_ID}__${patientId}`;
 
-type View = 'voice-idle' | 'voice-recording' | 'message';
-type RecordState = 'idle' | 'recording' | 'transcribing' | 'summarizing';
+type View = 'voice-idle' | 'voice-recording' | 'voice-review' | 'message';
+type RecordState = 'idle' | 'recording' | 'saving';
 type CompileState = 'idle' | 'compiling' | 'reviewing' | 'sending';
 
 export default function LogsPage() {
   const router = useRouter();
   const [view, setView] = useState<View>('voice-idle');
   const [recordState, setRecordState] = useState<RecordState>('idle');
-  const [partialTranscript, setPartialTranscript] = useState('');
+  const [liveTranscript, setLiveTranscript] = useState('');
+  const [editingTranscript, setEditingTranscript] = useState('');
   const [conversation, setConversation] = useState<ConversationTurn[]>(INITIAL_CONVERSATION);
   const [activePatientId, setActivePatientId] = useState(SAMPLE_PATIENTS[0].id);
   const [error, setError] = useState('');
@@ -48,8 +49,10 @@ export default function LogsPage() {
   const [compileState, setCompileState] = useState<CompileState>('idle');
   const [compiled, setCompiled] = useState<CompiledReport | null>(null);
 
-  const recorderRef = useRef<MediaRecorder | null>(null);
-  const chunksRef = useRef<Blob[]>([]);
+  // SpeechRecognition is non-standard; type as any to avoid lib pollution.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const recognitionRef = useRef<any>(null);
+  const finalTranscriptRef = useRef('');
 
   async function persistLog(
     transcript: string,
@@ -115,36 +118,79 @@ export default function LogsPage() {
 
   const activePatient = SAMPLE_PATIENTS.find((p) => p.id === activePatientId);
   const recording = view === 'voice-recording';
-  const busyLabel =
-    recordState === 'transcribing'
-      ? 'Transcribing…'
-      : recordState === 'summarizing'
-        ? 'Logging…'
-        : '';
+  const busyLabel = recordState === 'saving' ? 'Logging…' : '';
 
-  async function handlePressToSpeak() {
+  function handlePressToSpeak() {
     if (recordState !== 'idle') return;
     setError('');
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const SR = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    if (!SR) {
+      setError('Live transcription needs Chrome or Edge. Try a different browser.');
+      return;
+    }
+
+    const recognition = new SR();
+    recognition.continuous = true;
+    recognition.interimResults = true;
+    recognition.lang = 'en-US';
+
+    finalTranscriptRef.current = '';
+    setLiveTranscript('');
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    recognition.onresult = (e: any) => {
+      let interim = '';
+      for (let i = e.resultIndex; i < e.results.length; i++) {
+        const t = e.results[i][0].transcript;
+        if (e.results[i].isFinal) finalTranscriptRef.current += t;
+        else interim += t;
+      }
+      setLiveTranscript((finalTranscriptRef.current + interim).trim());
+    };
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    recognition.onerror = (e: any) => {
+      if (e.error === 'not-allowed') setError('Microphone access denied.');
+      else if (e.error !== 'no-speech' && e.error !== 'aborted') setError(`Recognition: ${e.error}`);
+    };
+
+    // Browser sometimes auto-stops after a silence — restart while still in recording mode.
+    recognition.onend = () => {
+      if (recognitionRef.current === recognition) {
+        try { recognition.start(); } catch { /* already started */ }
+      }
+    };
+
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const recorder = new MediaRecorder(stream);
-      chunksRef.current = [];
-      recorder.ondataavailable = (e) => chunksRef.current.push(e.data);
-      recorder.onstop = handleRecordingStop;
-      recorder.start();
-      recorderRef.current = recorder;
+      recognition.start();
+      recognitionRef.current = recognition;
       setRecordState('recording');
       setView('voice-recording');
-    } catch {
-      setError('Microphone access denied.');
+    } catch (e) {
+      setError(`Could not start recognition: ${(e as Error)?.message ?? 'unknown'}`);
     }
   }
 
   function handleDone() {
-    if (recordState !== 'recording' || !recorderRef.current) return;
-    recorderRef.current.stop();
-    recorderRef.current.stream.getTracks().forEach((t) => t.stop());
-    setRecordState('transcribing');
+    if (recordState !== 'recording') return;
+    const r = recognitionRef.current;
+    recognitionRef.current = null; // prevents the auto-restart in onend
+    try { r?.stop(); } catch { /* noop */ }
+
+    const text = (finalTranscriptRef.current || liveTranscript).trim();
+    setEditingTranscript(text);
+    setLiveTranscript('');
+    setRecordState('idle');
+    setView('voice-review');
+  }
+
+  function handleDiscardReview() {
+    setEditingTranscript('');
+    setLiveTranscript('');
+    setError('');
+    setView('voice-idle');
   }
 
   function handleSendText() {
@@ -160,13 +206,13 @@ export default function LogsPage() {
     setView('message');
   }
 
-  async function handleRecordingStop() {
-    const blob = new Blob(chunksRef.current, { type: 'audio/webm' });
+  async function handleSaveReview() {
+    const transcript = editingTranscript.trim();
+    if (!transcript || recordState !== 'idle') return;
+    setError('');
+    setRecordState('saving');
     const ts = Date.now();
     try {
-      const { transcript } = await api.transcribe(blob);
-      setPartialTranscript(transcript);
-
       const audioTurn: ConversationTurn = {
         kind: 'user-audio',
         id: `turn-${ts}`,
@@ -179,7 +225,6 @@ export default function LogsPage() {
       };
       setConversation((prev) => [...prev, audioTurn]);
 
-      setRecordState('summarizing');
       const summary = await api.summarize(
         activePatient?.name ?? 'Patient',
         transcript,
@@ -195,12 +240,14 @@ export default function LogsPage() {
       };
       setConversation((prev) => [...prev, aiTurn]);
       await persistLog(transcript, summary);
+      setEditingTranscript('');
+      setView('voice-idle');
     } catch (e) {
       setError(e instanceof ApiError ? e.message : 'Could not reach the AI service.');
+      // Stay on the review view so the caregiver can retry / edit / discard.
+      setView('voice-review');
     } finally {
-      setPartialTranscript('');
       setRecordState('idle');
-      setView('voice-idle');
     }
   }
 
@@ -242,18 +289,44 @@ export default function LogsPage() {
         </div>
       </header>
 
-      {view !== 'message' ? (
-        <VoiceView
-          recording={recording}
-          partialTranscript={partialTranscript}
-          busyLabel={busyLabel}
+      {view === 'message' ? (
+        <MessageView turns={conversation} />
+      ) : view === 'voice-review' ? (
+        <VoiceReviewView
+          value={editingTranscript}
+          onChange={setEditingTranscript}
+          saving={recordState === 'saving'}
           error={error}
         />
       ) : (
-        <MessageView turns={conversation} />
+        <VoiceView
+          recording={recording}
+          liveTranscript={liveTranscript}
+          busyLabel={busyLabel}
+          error={error}
+        />
       )}
 
-      {view === 'message' || keyboardOpen ? (
+      {view === 'voice-review' ? (
+        <div className="absolute bottom-[95px] left-[25px] right-[25px] z-10 flex items-center justify-between gap-3">
+          <button
+            type="button"
+            onClick={handleDiscardReview}
+            disabled={recordState === 'saving'}
+            className="flex-1 rounded-full border border-gray-300 bg-white py-3 font-semibold text-gray-100 disabled:opacity-50"
+          >
+            Discard
+          </button>
+          <button
+            type="button"
+            onClick={handleSaveReview}
+            disabled={recordState === 'saving' || !editingTranscript.trim()}
+            className="flex-1 rounded-full bg-[#C0DA5A] py-3 font-semibold text-[#1F2782] disabled:opacity-50"
+          >
+            {recordState === 'saving' ? 'Saving…' : 'Save'}
+          </button>
+        </div>
+      ) : view === 'message' || keyboardOpen ? (
         <div className="absolute bottom-[95px] left-[16px] right-[16px] z-10 flex items-center gap-[10px]">
           <div className="flex h-[44px] flex-1 items-center gap-[8px] rounded-full bg-white px-[14px] shadow-sm">
             <input
@@ -343,12 +416,12 @@ export default function LogsPage() {
 
 function VoiceView({
   recording,
-  partialTranscript,
+  liveTranscript,
   busyLabel,
   error,
 }: {
   recording: boolean;
-  partialTranscript: string;
+  liveTranscript: string;
   busyLabel: string;
   error: string;
 }) {
@@ -369,14 +442,51 @@ function VoiceView({
         <GradientBlob active={recording || Boolean(busyLabel)} className="h-full w-full" />
       </div>
 
-      {partialTranscript && (
-        <p className="absolute left-[40px] right-[40px] top-[540px] text-center text-base leading-snug text-gray-100">
-          {partialTranscript}
-        </p>
+      {liveTranscript && (
+        <div className="absolute left-[24px] right-[24px] bottom-[180px] max-h-[200px] overflow-y-auto rounded-2xl bg-white/70 px-4 py-3 backdrop-blur-sm">
+          <p className="text-sm leading-snug text-gray-100">{liveTranscript}</p>
+        </div>
       )}
 
       {error && (
-        <p className="absolute left-[40px] right-[40px] top-[600px] text-center text-sm text-red-600">
+        <p className="absolute left-[24px] right-[24px] bottom-[170px] text-center text-sm text-red-600">
+          {error}
+        </p>
+      )}
+    </>
+  );
+}
+
+function VoiceReviewView({
+  value,
+  onChange,
+  saving,
+  error,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  saving: boolean;
+  error: string;
+}) {
+  return (
+    <>
+      <p className="absolute left-1/2 top-[180px] -translate-x-1/2 whitespace-nowrap bg-gradient-to-r from-[#2B1B72] from-[10%] via-[#5E69F6] via-[55%] to-[#F4B6C8] to-[100%] bg-clip-text text-xl font-bold text-transparent">
+        Review &amp; edit
+      </p>
+
+      <div className="absolute left-[24px] right-[24px] top-[230px] bottom-[170px]">
+        <textarea
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          disabled={saving}
+          autoFocus
+          placeholder="Nothing was transcribed. Type your note here, or discard."
+          className="h-full w-full resize-none rounded-3xl bg-white/80 px-4 py-3 text-base leading-relaxed text-gray-100 placeholder:text-gray-60 outline-none backdrop-blur-sm focus:bg-white disabled:opacity-60"
+        />
+      </div>
+
+      {error && (
+        <p className="absolute left-[24px] right-[24px] bottom-[150px] text-center text-sm text-red-600">
           {error}
         </p>
       )}
