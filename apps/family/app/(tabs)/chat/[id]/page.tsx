@@ -19,6 +19,7 @@ import {
   type ChatMessage,
 } from '@alio/mock-data';
 import { supabase, type FamilyMessageRow } from '@/lib/supabase';
+import { ReportCard } from '@/components/ReportCard';
 
 // Map a family-side chat thread ID to the Supabase thread_id that the
 // caregiver app writes to. Add entries as more caregivers/patients come online.
@@ -40,6 +41,9 @@ export default function FamilyChatConversationPage() {
   const supabaseThreadId = SUPABASE_THREAD_FOR[id];
 
   const [messages, setMessages] = useState<ChatMessage[]>(initial);
+  // messageId -> compiled_reports.id, for messages that should render as a
+  // structured ReportCard instead of a plain chat bubble.
+  const [reportIdByMessage, setReportIdByMessage] = useState<Record<string, string>>({});
   const [draft, setDraft] = useState('');
 
   // Subscribe to live messages from the caregiver app via Supabase realtime.
@@ -66,6 +70,11 @@ export default function FamilyChatConversationPage() {
       const fresh = (data as FamilyMessageRow[]).filter((r) => !seen.has(r.id));
       fresh.forEach((r) => seen.add(r.id));
       setMessages((prev) => [...prev, ...fresh.map(toChatMessage)]);
+      setReportIdByMessage((prev) => {
+        const next = { ...prev };
+        for (const r of fresh) if (r.report_id) next[r.id] = r.report_id;
+        return next;
+      });
     })();
 
     const channel = supabase
@@ -83,6 +92,9 @@ export default function FamilyChatConversationPage() {
           if (seen.has(row.id)) return;
           seen.add(row.id);
           setMessages((prev) => [...prev, toChatMessage(row)]);
+          if (row.report_id) {
+            setReportIdByMessage((prev) => ({ ...prev, [row.id]: row.report_id! }));
+          }
         },
       )
       .subscribe();
@@ -162,9 +174,17 @@ export default function FamilyChatConversationPage() {
           </p>
         ) : (
           <div className="flex flex-col gap-[12px]">
-            {messages.map((m) => (
-              <ChatBubble key={m.id} message={m} />
-            ))}
+            {messages.map((m) => {
+              const reportId = reportIdByMessage[m.id];
+              if (reportId) {
+                return (
+                  <div key={m.id} className="flex">
+                    <ReportCard reportId={reportId} />
+                  </div>
+                );
+              }
+              return <ChatBubble key={m.id} message={m} />;
+            })}
           </div>
         )}
       </div>

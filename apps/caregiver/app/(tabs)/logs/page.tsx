@@ -50,6 +50,14 @@ export default function LogsPage() {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const recognitionRef = useRef<any>(null);
   const finalTranscriptRef = useRef('');
+  // MediaRecorder runs in parallel so we can fall back to FastAPI /transcribe
+  // when Web Speech errors out (network failure, unsupported browser, etc.).
+  const recorderRef = useRef<MediaRecorder | null>(null);
+  const chunksRef = useRef<Blob[]>([]);
+  // When Web Speech fails, we poll /transcribe with accumulated audio every
+  // few seconds for near-live captions. These refs coordinate that.
+  const fallbackPollingRef = useRef(false);
+  const transcribeInFlightRef = useRef(false);
 
   async function persistLog(
     transcript: string,
@@ -100,73 +108,178 @@ export default function LogsPage() {
   }
 
   const activePatient = SAMPLE_PATIENTS.find((p) => p.id === activePatientId);
-  const recording = view === 'voice-recording';
-  const busyLabel = recordState === 'saving' ? 'Logging…' : '';
+  const recording = view === 'voice-recording' && recordState === 'recording';
+  // Saving on the voice screen = the /transcribe fallback; on the review
+  // screen it's the summarize+persist step (label not shown there anyway).
+  const busyLabel = recordState === 'saving' ? 'Transcribing…' : '';
 
-  function handlePressToSpeak() {
+  async function handlePressToSpeak() {
     if (recordState !== 'idle') return;
     setError('');
-
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const SR = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-    if (!SR) {
-      setError('Live transcription needs Chrome or Edge. Try a different browser.');
-      return;
-    }
-
-    const recognition = new SR();
-    recognition.continuous = true;
-    recognition.interimResults = true;
-    recognition.lang = 'en-US';
-
     finalTranscriptRef.current = '';
     setLiveTranscript('');
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    recognition.onresult = (e: any) => {
-      let interim = '';
-      for (let i = e.resultIndex; i < e.results.length; i++) {
-        const t = e.results[i][0].transcript;
-        if (e.results[i].isFinal) finalTranscriptRef.current += t;
-        else interim += t;
-      }
-      setLiveTranscript((finalTranscriptRef.current + interim).trim());
-    };
-
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    recognition.onerror = (e: any) => {
-      if (e.error === 'not-allowed') setError('Microphone access denied.');
-      else if (e.error !== 'no-speech' && e.error !== 'aborted') setError(`Recognition: ${e.error}`);
-    };
-
-    // Browser sometimes auto-stops after a silence — restart while still in recording mode.
-    recognition.onend = () => {
-      if (recognitionRef.current === recognition) {
-        try { recognition.start(); } catch { /* already started */ }
-      }
-    };
-
+    // 1) Always start MediaRecorder so we have audio to fall back on.
+    let stream: MediaStream;
     try {
-      recognition.start();
-      recognitionRef.current = recognition;
-      setRecordState('recording');
-      setView('voice-recording');
-    } catch (e) {
-      setError(`Could not start recognition: ${(e as Error)?.message ?? 'unknown'}`);
+      stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    } catch {
+      setError('Microphone access denied.');
+      return;
     }
+    const recorder = new MediaRecorder(stream);
+    chunksRef.current = [];
+    fallbackPollingRef.current = false;
+    transcribeInFlightRef.current = false;
+
+    recorder.ondataavailable = async (e) => {
+      if (e.data && e.data.size > 0) chunksRef.current.push(e.data);
+      // If Web Speech is dead, transcribe what we have so far. Skip if a
+      // request is already in flight — they queue up otherwise.
+      if (!fallbackPollingRef.current || transcribeInFlightRef.current) return;
+      if (chunksRef.current.length === 0) return;
+      transcribeInFlightRef.current = true;
+      try {
+        const blob = new Blob(chunksRef.current, { type: 'audio/webm' });
+        const { transcript } = await api.transcribe(blob);
+        // Web Speech may have woken up in the meantime — only overwrite if
+        // we're still in fallback mode.
+        if (fallbackPollingRef.current && recorderRef.current === recorder) {
+          finalTranscriptRef.current = transcript;
+          setLiveTranscript(transcript);
+        }
+      } catch {
+        // ignore single-chunk failures; next tick will retry
+      } finally {
+        transcribeInFlightRef.current = false;
+      }
+    };
+    // 3-second timeslice: emit a chunk every 3s so polling can transcribe.
+    recorder.start(3000);
+    recorderRef.current = recorder;
+
+    // 2) Try Web Speech for live captions. If it fails (network / unsupported),
+    //    we fall back to chunk-polled /transcribe on the backend.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const SR = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    if (!SR) {
+      // No Web Speech at all — go straight to chunk polling.
+      fallbackPollingRef.current = true;
+    }
+    if (SR) {
+      const recognition = new SR();
+      recognition.continuous = true;
+      recognition.interimResults = true;
+      recognition.lang = 'en-US';
+
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      recognition.onresult = (e: any) => {
+        let interim = '';
+        for (let i = e.resultIndex; i < e.results.length; i++) {
+          const t = e.results[i][0].transcript;
+          if (e.results[i].isFinal) finalTranscriptRef.current += t;
+          else interim += t;
+        }
+        // Web Speech is alive — turn off the fallback poller.
+        fallbackPollingRef.current = false;
+        setLiveTranscript((finalTranscriptRef.current + interim).trim());
+      };
+
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      recognition.onerror = (e: any) => {
+        if (e.error && e.error !== 'no-speech' && e.error !== 'aborted') {
+          console.warn(`Speech recognition: ${e.error} — switching to server transcription.`);
+          // Activate the chunk poller for near-live captions via FastAPI.
+          fallbackPollingRef.current = true;
+        }
+      };
+
+      recognition.onend = () => {
+        // Auto-restart if we're still actively recording (silence timeout).
+        if (recognitionRef.current === recognition) {
+          try { recognition.start(); } catch { /* already started */ }
+        }
+      };
+
+      try {
+        recognition.start();
+        recognitionRef.current = recognition;
+        // Watchdog: if Web Speech hasn't produced any output by 5s, assume
+        // it's silently broken and activate the chunk-polling fallback.
+        setTimeout(() => {
+          if (
+            recognitionRef.current === recognition &&
+            !finalTranscriptRef.current &&
+            !fallbackPollingRef.current
+          ) {
+            console.warn('Web Speech silent for 5s — activating server transcription.');
+            fallbackPollingRef.current = true;
+          }
+        }, 5000);
+      } catch {
+        // Live captions unavailable; chunk polling will cover it.
+        recognitionRef.current = null;
+        fallbackPollingRef.current = true;
+      }
+    }
+
+    setRecordState('recording');
+    setView('voice-recording');
   }
 
-  function handleDone() {
+  async function handleDone() {
     if (recordState !== 'recording') return;
+
+    // Stop SpeechRecognition (if it was running) — null first to skip restart.
     const r = recognitionRef.current;
-    recognitionRef.current = null; // prevents the auto-restart in onend
+    recognitionRef.current = null;
     try { r?.stop(); } catch { /* noop */ }
 
-    const text = (finalTranscriptRef.current || liveTranscript).trim();
-    setEditingTranscript(text);
+    // Snapshot the live caption text, then stop the recorder synchronously
+    // so we can grab the blob.
+    const liveText = (finalTranscriptRef.current || liveTranscript).trim();
+    const recorder = recorderRef.current;
+    recorderRef.current = null;
+
+    if (liveText) {
+      // Web Speech captured something — use it. No need to transcribe on the
+      // server. Stop the mic and move to review.
+      try { recorder?.stop(); } catch { /* noop */ }
+      recorder?.stream.getTracks().forEach((t) => t.stop());
+      setEditingTranscript(liveText);
+      setLiveTranscript('');
+      setRecordState('idle');
+      setView('voice-review');
+      return;
+    }
+
+    // Fallback path: Web Speech produced nothing (network error / browser
+    // doesn't support it). Send the recorded audio to FastAPI /transcribe.
     setLiveTranscript('');
-    setRecordState('idle');
-    setView('voice-review');
+    setRecordState('saving');
+    setView('voice-recording'); // show busyLabel "Logging…" over the blob
+    setError('');
+
+    const blob: Blob = await new Promise((resolve) => {
+      if (!recorder) return resolve(new Blob([], { type: 'audio/webm' }));
+      recorder.onstop = () => {
+        resolve(new Blob(chunksRef.current, { type: 'audio/webm' }));
+      };
+      try { recorder.stop(); } catch { resolve(new Blob([], { type: 'audio/webm' })); }
+    });
+    recorder?.stream.getTracks().forEach((t) => t.stop());
+
+    try {
+      const { transcript } = await api.transcribe(blob);
+      setEditingTranscript(transcript);
+      setView('voice-review');
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : 'Could not transcribe audio.');
+      setEditingTranscript('');
+      setView('voice-review');
+    } finally {
+      setRecordState('idle');
+    }
   }
 
   function handleDiscardReview() {
@@ -176,10 +289,13 @@ export default function LogsPage() {
     setView('voice-idle');
   }
 
-  function handleSendText() {
+  async function handleSendText() {
     const text = draft.trim();
-    if (!text) return;
+    if (!text || recordState !== 'idle') return;
+    setError('');
     const ts = Date.now();
+
+    // Show the typed bubble immediately.
     setConversation((prev) => [
       ...prev,
       { kind: 'user-text', id: `turn-${ts}`, text },
@@ -187,6 +303,29 @@ export default function LogsPage() {
     setDraft('');
     setKeyboardOpen(false);
     setView('message');
+    setRecordState('saving');
+
+    try {
+      const summary = await api.summarize(
+        activePatient?.name ?? 'Patient',
+        text,
+        '',
+      );
+      const aiTurn: ConversationTurn = {
+        kind: 'ai-summary',
+        id: `turn-${ts}-ai`,
+        summary: summary.summary,
+        mood: summary.mood,
+        medicationsNoted: summary.medications_noted,
+        urgent: summary.urgent,
+      };
+      setConversation((prev) => [...prev, aiTurn]);
+      await persistLog(text, summary);
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : 'Could not reach the AI service.');
+    } finally {
+      setRecordState('idle');
+    }
   }
 
   async function handleSaveReview() {
@@ -415,9 +554,24 @@ function VoiceView({
       </div>
 
       {liveTranscript && (
-        <div className="absolute left-[24px] right-[24px] bottom-[180px] max-h-[200px] overflow-y-auto rounded-2xl bg-white/70 px-4 py-3 backdrop-blur-sm">
-          <p className="text-sm leading-snug text-gray-100">{liveTranscript}</p>
-        </div>
+        <p className="absolute left-[24px] right-[24px] bottom-[180px] text-center text-[18px] leading-[26px] font-medium">
+          {(() => {
+            // Show only the last ~30 words so long transcripts never overflow;
+            // fade older words to gray-60 and keep the most recent 4 in black,
+            // matching the "karaoke" treatment in the Figma recording state.
+            const words = liveTranscript.trim().split(/\s+/);
+            const tail = words.slice(-30);
+            const splitAt = Math.max(0, tail.length - 4);
+            return tail.map((w, i) => (
+              <span
+                key={`${i}-${w}`}
+                className={i < splitAt ? 'text-gray-60' : 'text-gray-100'}
+              >
+                {w}{i < tail.length - 1 ? ' ' : ''}
+              </span>
+            ));
+          })()}
+        </p>
       )}
 
       {error && (

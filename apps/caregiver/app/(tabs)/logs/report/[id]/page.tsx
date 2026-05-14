@@ -65,6 +65,7 @@ export default function LogReportPage() {
         thread_id: threadIdFor(row.caregiver_id, row.patient_id),
         sender: CAREGIVER_NAME,
         text,
+        report_id: row.id,
       });
       if (insertError) {
         setSendError(`Could not send: ${insertError.message}`);
