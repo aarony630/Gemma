@@ -58,13 +58,17 @@ export default function LogsPage() {
     const { error: insertError } = await supabase.from('caregiver_logs').insert({
       caregiver_id: CAREGIVER_ID,
       patient_id: activePatientId,
+      visit_date: new Date().toISOString().slice(0, 10),
       transcript,
       summary: summary.summary,
       mood: summary.mood,
       medications_noted: summary.medications_noted,
       urgent: summary.urgent,
     });
-    if (insertError) console.warn('Failed to persist caregiver log:', insertError);
+    if (insertError) {
+      console.warn('Failed to persist caregiver log:', insertError);
+      setError(`Save failed: ${insertError.message}`);
+    }
   }
 
   async function handleCompile() {
