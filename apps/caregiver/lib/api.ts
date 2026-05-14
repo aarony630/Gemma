@@ -25,6 +25,12 @@ export interface VisitSummary {
   urgent: boolean;
 }
 
+export interface CompiledReport {
+  text: string;
+  log_count: number;
+  visit_date: string;
+}
+
 export const api = {
   transcribe: (audio: Blob) =>
     request<{ transcript: string }>('/transcribe', {
@@ -38,5 +44,12 @@ export const api = {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ patient_name, transcript, notes }),
+    }),
+
+  compileLogs: (caregiver_id: string, patient_id: string, patient_name: string) =>
+    request<CompiledReport>('/caregiver-logs/compile', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ caregiver_id, patient_id, patient_name }),
     }),
 };

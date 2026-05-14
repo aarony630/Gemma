@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import {
   ChatBubble,
@@ -18,6 +18,13 @@ import {
   SAMPLE_FM_CONVERSATIONS,
   type ChatMessage,
 } from '@alio/mock-data';
+import { supabase, type FamilyMessageRow } from '@/lib/supabase';
+
+// Map a family-side chat thread ID to the Supabase thread_id that the
+// caregiver app writes to. Add entries as more caregivers/patients come online.
+const SUPABASE_THREAD_FOR: Record<string, string | undefined> = {
+  'sarah-caregiver': 'caregiver-001__dorothy-chen',
+};
 
 /**
  * Family Chat conversation — same layout as Caregiver Chat conversation,
@@ -30,9 +37,61 @@ export default function FamilyChatConversationPage() {
 
   const thread = SAMPLE_FM_CHAT_THREADS.find((t) => t.id === id);
   const initial = SAMPLE_FM_CONVERSATIONS[id] ?? [];
+  const supabaseThreadId = SUPABASE_THREAD_FOR[id];
 
   const [messages, setMessages] = useState<ChatMessage[]>(initial);
   const [draft, setDraft] = useState('');
+
+  // Subscribe to live messages from the caregiver app via Supabase realtime.
+  // Initial fetch loads any messages we missed before the subscription opened.
+  useEffect(() => {
+    if (!supabaseThreadId) return;
+
+    let cancelled = false;
+    const seen = new Set<string>();
+
+    const toChatMessage = (row: FamilyMessageRow): ChatMessage => ({
+      id: row.id,
+      sender: 'them',
+      text: row.text,
+    });
+
+    (async () => {
+      const { data } = await supabase
+        .from('family_messages')
+        .select('*')
+        .eq('thread_id', supabaseThreadId)
+        .order('created_at');
+      if (cancelled || !data) return;
+      const fresh = (data as FamilyMessageRow[]).filter((r) => !seen.has(r.id));
+      fresh.forEach((r) => seen.add(r.id));
+      setMessages((prev) => [...prev, ...fresh.map(toChatMessage)]);
+    })();
+
+    const channel = supabase
+      .channel(`family_messages:${supabaseThreadId}`)
+      .on(
+        'postgres_changes',
+        {
+          event: 'INSERT',
+          schema: 'public',
+          table: 'family_messages',
+          filter: `thread_id=eq.${supabaseThreadId}`,
+        },
+        (payload) => {
+          const row = payload.new as FamilyMessageRow;
+          if (seen.has(row.id)) return;
+          seen.add(row.id);
+          setMessages((prev) => [...prev, toChatMessage(row)]);
+        },
+      )
+      .subscribe();
+
+    return () => {
+      cancelled = true;
+      supabase.removeChannel(channel);
+    };
+  }, [supabaseThreadId]);
 
   const handleSend = () => {
     const text = draft.trim();

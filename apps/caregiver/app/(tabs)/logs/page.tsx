@@ -24,10 +24,16 @@ import {
   SAMPLE_PATIENTS,
   type ConversationTurn,
 } from '@alio/mock-data';
-import { api, ApiError } from '@/lib/api';
+import { api, ApiError, type CompiledReport } from '@/lib/api';
+import { supabase } from '@/lib/supabase';
+
+const CAREGIVER_ID = 'caregiver-001';
+const CAREGIVER_NAME = 'Sarah Mitchell';
+const threadIdFor = (patientId: string) => `${CAREGIVER_ID}__${patientId}`;
 
 type View = 'voice-idle' | 'voice-recording' | 'message';
 type RecordState = 'idle' | 'recording' | 'transcribing' | 'summarizing';
+type CompileState = 'idle' | 'compiling' | 'reviewing' | 'sending';
 
 export default function LogsPage() {
   const router = useRouter();
@@ -39,9 +45,69 @@ export default function LogsPage() {
   const [error, setError] = useState('');
   const [keyboardOpen, setKeyboardOpen] = useState(false);
   const [draft, setDraft] = useState('');
+  const [compileState, setCompileState] = useState<CompileState>('idle');
+  const [compiled, setCompiled] = useState<CompiledReport | null>(null);
 
   const recorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
+
+  async function persistLog(
+    transcript: string,
+    summary: Awaited<ReturnType<typeof api.summarize>>,
+  ) {
+    const { error: insertError } = await supabase.from('caregiver_logs').insert({
+      caregiver_id: CAREGIVER_ID,
+      patient_id: activePatientId,
+      transcript,
+      summary: summary.summary,
+      mood: summary.mood,
+      medications_noted: summary.medications_noted,
+      urgent: summary.urgent,
+    });
+    if (insertError) console.warn('Failed to persist caregiver log:', insertError);
+  }
+
+  async function handleCompile() {
+    if (compileState !== 'idle') return;
+    setError('');
+    setCompileState('compiling');
+    setCompiled(null);
+    try {
+      const result = await api.compileLogs(
+        CAREGIVER_ID,
+        activePatientId,
+        activePatient?.name ?? 'Patient',
+      );
+      setCompiled(result);
+      setCompileState('reviewing');
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : 'Could not compile logs.');
+      setCompileState('idle');
+    }
+  }
+
+  async function handleSendToFamily() {
+    if (!compiled || compileState !== 'reviewing') return;
+    setCompileState('sending');
+    setError('');
+    const { error: sendError } = await supabase.from('family_messages').insert({
+      thread_id: threadIdFor(activePatientId),
+      sender: CAREGIVER_NAME,
+      text: compiled.text,
+    });
+    if (sendError) {
+      setError(`Could not send: ${sendError.message}`);
+      setCompileState('reviewing');
+      return;
+    }
+    setCompiled(null);
+    setCompileState('idle');
+  }
+
+  function handleDiscardCompiled() {
+    setCompiled(null);
+    setCompileState('idle');
+  }
 
   const activePatient = SAMPLE_PATIENTS.find((p) => p.id === activePatientId);
   const recording = view === 'voice-recording';
@@ -124,6 +190,7 @@ export default function LogsPage() {
         urgent: summary.urgent,
       };
       setConversation((prev) => [...prev, aiTurn]);
+      await persistLog(transcript, summary);
     } catch (e) {
       setError(e instanceof ApiError ? e.message : 'Could not reach the AI service.');
     } finally {
@@ -217,7 +284,8 @@ export default function LogsPage() {
           </div>
           <button
             type="button"
-            aria-label="More actions"
+            aria-label="Compile today's logs and review"
+            onClick={handleCompile}
             className="flex size-[44px] items-center justify-center rounded-[12px] bg-white shadow-sm transition-colors active:bg-brand-tint-1"
           >
             <IconPlus className="size-[22px] text-gray-100" />
@@ -237,10 +305,33 @@ export default function LogsPage() {
           ) : (
             <PressToSpeakButton variant="idle" onClick={handlePressToSpeak} className="w-[216px]" />
           )}
-          <IconBox size={48} aria-label="More actions">
+          <IconBox
+            size={48}
+            aria-label="Compile today's logs and review"
+            onClick={handleCompile}
+          >
             <IconPlus className="size-6 text-gray-100" />
           </IconBox>
         </div>
+      )}
+
+      {compileState === 'compiling' && (
+        <div className="absolute inset-0 z-30 flex items-center justify-center bg-black/30 backdrop-blur-sm">
+          <div className="rounded-2xl bg-white px-6 py-4 shadow-lg">
+            <p className="text-gray-100">Compiling today’s logs…</p>
+          </div>
+        </div>
+      )}
+
+      {(compileState === 'reviewing' || compileState === 'sending') && compiled && (
+        <ReviewModal
+          patientName={activePatient?.name ?? 'Patient'}
+          compiled={compiled}
+          sending={compileState === 'sending'}
+          onDiscard={handleDiscardCompiled}
+          onSend={handleSendToFamily}
+          error={error}
+        />
       )}
     </div>
   );
@@ -324,6 +415,73 @@ function MessageView({ turns }: { turns: ConversationTurn[] }) {
           }
           return <SummaryBubble key={turn.id} turn={turn} />;
         })}
+      </div>
+    </div>
+  );
+}
+
+function ReviewModal({
+  patientName,
+  compiled,
+  sending,
+  onDiscard,
+  onSend,
+  error,
+}: {
+  patientName: string;
+  compiled: CompiledReport;
+  sending: boolean;
+  onDiscard: () => void;
+  onSend: () => void;
+  error: string;
+}) {
+  return (
+    <div className="absolute inset-0 z-30 flex items-center justify-center bg-black/40 p-4 backdrop-blur-sm">
+      <div className="flex max-h-[80%] w-full max-w-[420px] flex-col rounded-3xl bg-white shadow-xl">
+        <div className="flex items-start justify-between gap-3 border-b border-gray-200 p-4">
+          <div>
+            <p className="text-xs uppercase tracking-wide text-gray-60">Compiled shift report</p>
+            <p className="text-lg font-semibold text-gray-100">{patientName}</p>
+            <p className="text-xs text-gray-60">
+              {compiled.log_count} log{compiled.log_count === 1 ? '' : 's'} from {compiled.visit_date}
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={onDiscard}
+            className="text-2xl leading-none text-gray-60 hover:text-gray-100"
+            aria-label="Discard"
+          >
+            ×
+          </button>
+        </div>
+
+        <div className="flex-1 overflow-y-auto px-4 py-3">
+          <p className="whitespace-pre-wrap text-sm leading-relaxed text-gray-100">
+            {compiled.text}
+          </p>
+        </div>
+
+        {error && <p className="px-4 pb-2 text-sm text-red-600">{error}</p>}
+
+        <div className="flex gap-3 border-t border-gray-200 p-4">
+          <button
+            type="button"
+            onClick={onDiscard}
+            disabled={sending}
+            className="flex-1 rounded-full border border-gray-300 py-3 font-semibold text-gray-100 disabled:opacity-50"
+          >
+            Discard
+          </button>
+          <button
+            type="button"
+            onClick={onSend}
+            disabled={sending}
+            className="flex-1 rounded-full bg-[#C0DA5A] py-3 font-semibold text-[#1F2782] disabled:opacity-50"
+          >
+            {sending ? 'Sending…' : 'Send to family'}
+          </button>
+        </div>
       </div>
     </div>
   );
