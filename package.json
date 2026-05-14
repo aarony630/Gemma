@@ -1,0 +1,23 @@
+{
+  "name": "alio",
+  "version": "0.0.1",
+  "private": true,
+  "description": "Alio — AI copilot for elder care. UI prototype monorepo.",
+  "scripts": {
+    "dev": "pnpm --parallel -r dev",
+    "dev:caregiver": "pnpm --filter @alio/caregiver dev",
+    "dev:family": "pnpm --filter @alio/family dev",
+    "build": "pnpm -r build",
+    "lint": "pnpm -r lint",
+    "typecheck": "pnpm -r typecheck",
+    "icons:generate": "node scripts/generate-icons.mjs"
+  },
+  "devDependencies": {
+    "typescript": "^5.6.3"
+  },
+  "engines": {
+    "node": ">=20",
+    "pnpm": ">=9"
+  },
+  "packageManager": "pnpm@11.1.1"
+}

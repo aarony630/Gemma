@@ -1,0 +1,88 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  /* Brand */
+  --color-brand-primary: #5E69F6;
+  --color-brand-active: #4856FF;
+  --color-brand-accent: #C0DA5A;
+  --color-brand-tint-1: #EDEDFC;
+  --color-brand-tint-2: #EAEAF2;
+  --color-brand-border: #D3D5EC;
+
+  /* Gray scale */
+  --color-gray-10: #FFFFFF;
+  --color-gray-30: #EDEDED;
+  --color-gray-60: #9E9E9E;
+  --color-gray-80: #28292C;
+  --color-gray-90: #181818;
+  --color-gray-100: #0A0A0A;
+
+  /* Semantic */
+  --color-alert: #FF3B30;
+  --color-info: #1C4EAB;
+}
+
+html,
+body {
+  height: 100%;
+  background: var(--color-gray-30);
+  color: var(--color-gray-100);
+  font-family: var(--font-century-gothic), system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+
+  /* Hide scrollbars on all platforms but keep scrolling */
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+html::-webkit-scrollbar,
+body::-webkit-scrollbar,
+*::-webkit-scrollbar {
+  display: none;
+  width: 0;
+  height: 0;
+}
+
+/* "Hi, I am listening" — animated gradient that flows L↔R while recording.
+ * background-size is wider than the element so position shifts reveal new colors.
+ */
+@keyframes listening-gradient {
+  0% {
+    background-position: 0% 50%;
+  }
+  50% {
+    background-position: 100% 50%;
+  }
+  100% {
+    background-position: 0% 50%;
+  }
+}
+
+/* Voice blob — slow breathing pulse + subtle hue cycle while recording.
+ * filter combines blur (from inline style) and hue-rotate (animated) — we redeclare
+ * both in keyframes because animating `filter` replaces it wholesale.
+ */
+@keyframes blob-pulse {
+  0% {
+    transform: scale(1);
+    opacity: 0.85;
+    filter: blur(28px) hue-rotate(0deg);
+  }
+  33% {
+    transform: scale(1.06);
+    opacity: 0.95;
+    filter: blur(28px) hue-rotate(20deg);
+  }
+  66% {
+    transform: scale(1.04);
+    opacity: 1;
+    filter: blur(32px) hue-rotate(-15deg);
+  }
+  100% {
+    transform: scale(1);
+    opacity: 0.85;
+    filter: blur(28px) hue-rotate(0deg);
+  }
+}
