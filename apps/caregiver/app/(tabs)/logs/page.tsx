@@ -24,16 +24,14 @@ import {
   SAMPLE_PATIENTS,
   type ConversationTurn,
 } from '@alio/mock-data';
-import { api, ApiError, type CompiledReport } from '@/lib/api';
+import { api, ApiError } from '@/lib/api';
 import { supabase } from '@/lib/supabase';
 
 const CAREGIVER_ID = 'caregiver-001';
-const CAREGIVER_NAME = 'Sarah Mitchell';
-const threadIdFor = (patientId: string) => `${CAREGIVER_ID}__${patientId}`;
 
 type View = 'voice-idle' | 'voice-recording' | 'voice-review' | 'message';
 type RecordState = 'idle' | 'recording' | 'saving';
-type CompileState = 'idle' | 'compiling' | 'reviewing' | 'sending';
+type CompileState = 'idle' | 'compiling';
 
 export default function LogsPage() {
   const router = useRouter();
@@ -47,7 +45,6 @@ export default function LogsPage() {
   const [keyboardOpen, setKeyboardOpen] = useState(false);
   const [draft, setDraft] = useState('');
   const [compileState, setCompileState] = useState<CompileState>('idle');
-  const [compiled, setCompiled] = useState<CompiledReport | null>(null);
 
   // SpeechRecognition is non-standard; type as any to avoid lib pollution.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -78,42 +75,28 @@ export default function LogsPage() {
     if (compileState !== 'idle') return;
     setError('');
     setCompileState('compiling');
-    setCompiled(null);
     try {
       const result = await api.compileLogs(
         CAREGIVER_ID,
         activePatientId,
         activePatient?.name ?? 'Patient',
       );
-      setCompiled(result);
-      setCompileState('reviewing');
+      // Append a tappable "Dorothy's Report" card to the chat and jump to it.
+      const turn: ConversationTurn = {
+        kind: 'report',
+        id: `report-turn-${result.id}`,
+        reportId: result.id,
+        patientName: activePatient?.name ?? 'Patient',
+        visitDate: result.visit_date,
+        visitTime: result.visit_time,
+      };
+      setConversation((prev) => [...prev, turn]);
+      setView('message');
     } catch (e) {
       setError(e instanceof ApiError ? e.message : 'Could not compile logs.');
+    } finally {
       setCompileState('idle');
     }
-  }
-
-  async function handleSendToFamily() {
-    if (!compiled || compileState !== 'reviewing') return;
-    setCompileState('sending');
-    setError('');
-    const { error: sendError } = await supabase.from('family_messages').insert({
-      thread_id: threadIdFor(activePatientId),
-      sender: CAREGIVER_NAME,
-      text: compiled.text,
-    });
-    if (sendError) {
-      setError(`Could not send: ${sendError.message}`);
-      setCompileState('reviewing');
-      return;
-    }
-    setCompiled(null);
-    setCompileState('idle');
-  }
-
-  function handleDiscardCompiled() {
-    setCompiled(null);
-    setCompileState('idle');
   }
 
   const activePatient = SAMPLE_PATIENTS.find((p) => p.id === activePatientId);
@@ -395,20 +378,9 @@ export default function LogsPage() {
       {compileState === 'compiling' && (
         <div className="absolute inset-0 z-30 flex items-center justify-center bg-black/30 backdrop-blur-sm">
           <div className="rounded-2xl bg-white px-6 py-4 shadow-lg">
-            <p className="text-gray-100">Compiling today’s logs…</p>
+            <p className="text-gray-100">Compiling today’s report…</p>
           </div>
         </div>
-      )}
-
-      {(compileState === 'reviewing' || compileState === 'sending') && compiled && (
-        <ReviewModal
-          patientName={activePatient?.name ?? 'Patient'}
-          compiled={compiled}
-          sending={compileState === 'sending'}
-          onDiscard={handleDiscardCompiled}
-          onSend={handleSendToFamily}
-          error={error}
-        />
       )}
     </div>
   );
@@ -495,6 +467,7 @@ function VoiceReviewView({
 }
 
 function MessageView({ turns }: { turns: ConversationTurn[] }) {
+  const router = useRouter();
   const scrollRef = useRef<HTMLDivElement | null>(null);
   useEffect(() => {
     if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
@@ -527,6 +500,15 @@ function MessageView({ turns }: { turns: ConversationTurn[] }) {
           if (turn.kind === 'ai-tasks') {
             return <TaskCard key={turn.id} intro={turn.intro} tasks={turn.tasks} />;
           }
+          if (turn.kind === 'report') {
+            return (
+              <ReportBubble
+                key={turn.id}
+                patientName={turn.patientName}
+                onClick={() => router.push(`/logs/report/${turn.reportId}`)}
+              />
+            );
+          }
           return <SummaryBubble key={turn.id} turn={turn} />;
         })}
       </div>
@@ -534,70 +516,32 @@ function MessageView({ turns }: { turns: ConversationTurn[] }) {
   );
 }
 
-function ReviewModal({
+function ReportBubble({
   patientName,
-  compiled,
-  sending,
-  onDiscard,
-  onSend,
-  error,
+  onClick,
 }: {
   patientName: string;
-  compiled: CompiledReport;
-  sending: boolean;
-  onDiscard: () => void;
-  onSend: () => void;
-  error: string;
+  onClick: () => void;
 }) {
   return (
-    <div className="absolute inset-0 z-30 flex items-center justify-center bg-black/40 p-4 backdrop-blur-sm">
-      <div className="flex max-h-[80%] w-full max-w-[420px] flex-col rounded-3xl bg-white shadow-xl">
-        <div className="flex items-start justify-between gap-3 border-b border-gray-200 p-4">
-          <div>
-            <p className="text-xs uppercase tracking-wide text-gray-60">Compiled shift report</p>
-            <p className="text-lg font-semibold text-gray-100">{patientName}</p>
-            <p className="text-xs text-gray-60">
-              {compiled.log_count} log{compiled.log_count === 1 ? '' : 's'} from {compiled.visit_date}
-            </p>
-          </div>
-          <button
-            type="button"
-            onClick={onDiscard}
-            className="text-2xl leading-none text-gray-60 hover:text-gray-100"
-            aria-label="Discard"
-          >
-            ×
-          </button>
+    <button
+      type="button"
+      onClick={onClick}
+      className="flex h-[64px] w-[232px] items-center justify-between rounded-[12px] bg-[#eeeeee] pl-[8px] pr-[16px] py-[12px] transition-colors active:bg-[#e2e2e2]"
+    >
+      <div className="flex items-center gap-[12px]">
+        <div className="flex size-[40px] items-center justify-center rounded-[8px] bg-brand-tint-2 p-[5px]">
+          <svg className="size-[24px] text-gray-100" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+            <polyline points="14 2 14 8 20 8" />
+          </svg>
         </div>
-
-        <div className="flex-1 overflow-y-auto px-4 py-3">
-          <p className="whitespace-pre-wrap text-sm leading-relaxed text-gray-100">
-            {compiled.text}
-          </p>
-        </div>
-
-        {error && <p className="px-4 pb-2 text-sm text-red-600">{error}</p>}
-
-        <div className="flex gap-3 border-t border-gray-200 p-4">
-          <button
-            type="button"
-            onClick={onDiscard}
-            disabled={sending}
-            className="flex-1 rounded-full border border-gray-300 py-3 font-semibold text-gray-100 disabled:opacity-50"
-          >
-            Discard
-          </button>
-          <button
-            type="button"
-            onClick={onSend}
-            disabled={sending}
-            className="flex-1 rounded-full bg-[#C0DA5A] py-3 font-semibold text-[#1F2782] disabled:opacity-50"
-          >
-            {sending ? 'Sending…' : 'Send to family'}
-          </button>
-        </div>
+        <span className="font-bold text-[14px] text-black">{patientName}’s Report</span>
       </div>
-    </div>
+      <svg className="size-[16px] text-gray-100" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+        <polyline points="9 18 15 12 9 6" />
+      </svg>
+    </button>
   );
 }
 

@@ -25,10 +25,53 @@ export interface VisitSummary {
   urgent: boolean;
 }
 
-export interface CompiledReport {
-  text: string;
+export type Severity = 'critical' | 'warning' | 'good' | 'none';
+
+export interface ReportFlag {
+  severity: Severity;
+  label: string;
+  note: string | null;
+}
+
+export interface MedsFlag extends ReportFlag {
+  meds: { name: string; taken: boolean }[];
+}
+
+export interface VisitReport {
+  vitals: {
+    bp: string | null;
+    pulse: string | null;
+    temp: string | null;
+    flag: ReportFlag;
+  };
+  mood: {
+    value: string;
+    flag: ReportFlag;
+  };
+  meds: {
+    status: string;
+    flag: MedsFlag;
+  };
+}
+
+export interface CompiledReportResponse {
+  id: string;
+  report: VisitReport;
   log_count: number;
   visit_date: string;
+  visit_time: string;
+}
+
+export interface CompiledReportRow {
+  id: string;
+  caregiver_id: string;
+  patient_id: string;
+  patient_name: string;
+  visit_date: string;
+  visit_time: string | null;
+  report: VisitReport;
+  source_log_count: number;
+  created_at: string;
 }
 
 export const api = {
@@ -47,9 +90,19 @@ export const api = {
     }),
 
   compileLogs: (caregiver_id: string, patient_id: string, patient_name: string) =>
-    request<CompiledReport>('/caregiver-logs/compile', {
+    request<CompiledReportResponse>('/caregiver-logs/compile', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ caregiver_id, patient_id, patient_name }),
+    }),
+
+  getCompiledReport: (id: string) =>
+    request<CompiledReportRow>(`/caregiver-logs/report/${id}`),
+
+  formatReportForFamily: (patient_name: string, visit_date: string, report: VisitReport) =>
+    request<{ text: string }>('/caregiver-logs/report/format-for-family', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ patient_name, visit_date, report }),
     }),
 };
