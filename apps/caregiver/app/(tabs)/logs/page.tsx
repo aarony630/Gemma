@@ -17,70 +17,103 @@ import {
 } from '@alio/ui';
 import {
   INITIAL_CONVERSATION,
-  SIMULATED_TRANSCRIPT,
   SAMPLE_PATIENTS,
   type ConversationTurn,
 } from '@alio/mock-data';
+import { api, ApiError } from '@/lib/api';
 
 type View = 'voice-idle' | 'voice-recording' | 'message';
+type RecordState = 'idle' | 'recording' | 'transcribing' | 'summarizing';
 
 export default function LogsPage() {
   const router = useRouter();
   const [view, setView] = useState<View>('voice-idle');
-  const [transcript, setTranscript] = useState('');
+  const [recordState, setRecordState] = useState<RecordState>('idle');
+  const [partialTranscript, setPartialTranscript] = useState('');
   const [conversation, setConversation] = useState<ConversationTurn[]>(INITIAL_CONVERSATION);
   const [activePatientId, setActivePatientId] = useState(SAMPLE_PATIENTS[0].id);
+  const [error, setError] = useState('');
 
-  // Simulated transcript stream during recording
-  useEffect(() => {
-    if (view !== 'voice-recording') {
-      setTranscript('');
-      return;
+  const recorderRef = useRef<MediaRecorder | null>(null);
+  const chunksRef = useRef<Blob[]>([]);
+
+  const activePatient = SAMPLE_PATIENTS.find((p) => p.id === activePatientId);
+  const recording = view === 'voice-recording';
+  const busyLabel =
+    recordState === 'transcribing'
+      ? 'Transcribing…'
+      : recordState === 'summarizing'
+        ? 'Logging…'
+        : '';
+
+  async function handlePressToSpeak() {
+    if (recordState !== 'idle') return;
+    setError('');
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const recorder = new MediaRecorder(stream);
+      chunksRef.current = [];
+      recorder.ondataavailable = (e) => chunksRef.current.push(e.data);
+      recorder.onstop = handleRecordingStop;
+      recorder.start();
+      recorderRef.current = recorder;
+      setRecordState('recording');
+      setView('voice-recording');
+    } catch {
+      setError('Microphone access denied.');
     }
-    let i = 0;
-    const id = setInterval(() => {
-      i += 2;
-      setTranscript(SIMULATED_TRANSCRIPT.slice(0, i));
-      if (i >= SIMULATED_TRANSCRIPT.length) clearInterval(id);
-    }, 40);
-    return () => clearInterval(id);
-  }, [view]);
+  }
 
-  const handlePressToSpeak = () => {
-    setView('voice-recording');
-  };
+  function handleDone() {
+    if (recordState !== 'recording' || !recorderRef.current) return;
+    recorderRef.current.stop();
+    recorderRef.current.stream.getTracks().forEach((t) => t.stop());
+    setRecordState('transcribing');
+    // View stays 'voice-recording' visually until we resolve, then flips below.
+  }
 
-  // Pressing Done saves the recording to the conversation BUT stays in voice mode.
-  // To view the conversation, user toggles Message via the dropdown.
-  const handleDone = () => {
+  async function handleRecordingStop() {
+    const blob = new Blob(chunksRef.current, { type: 'audio/webm' });
     const ts = Date.now();
-    const newTurn: ConversationTurn = {
-      kind: 'user-audio',
-      id: `turn-${ts}`,
-      time: new Date().toLocaleTimeString('en-US', {
-        hour: 'numeric',
-        minute: '2-digit',
-        hour12: false,
-      }),
-      transcript: transcript || SIMULATED_TRANSCRIPT,
-    };
-    const aiResponse: ConversationTurn = {
-      kind: 'ai-tasks',
-      id: `turn-${ts}-ai`,
-      intro: 'Got it. Here are the rest of the to-dos for today.',
-      tasks: [
-        { id: `n${ts}-1`, label: 'Help Sarah shower', done: false },
-        { id: `n${ts}-2`, label: 'Daily medication', done: false },
-        { id: `n${ts}-3`, label: 'Check vitals at 4pm', done: false },
-      ],
-    };
-    setConversation((prev) => [...prev, newTurn, aiResponse]);
-    setView('voice-idle'); // stay in voice mode
-  };
+    try {
+      const { transcript } = await api.transcribe(blob);
+      setPartialTranscript(transcript);
 
-  // View toggle is now done via the chat icon at top-right (history list).
-  // Voice idle ↔ message conversation can still be reached by tapping
-  // history then back, or simply via the Done flow.
+      const audioTurn: ConversationTurn = {
+        kind: 'user-audio',
+        id: `turn-${ts}`,
+        time: new Date().toLocaleTimeString('en-US', {
+          hour: 'numeric',
+          minute: '2-digit',
+          hour12: false,
+        }),
+        transcript,
+      };
+      setConversation((prev) => [...prev, audioTurn]);
+
+      setRecordState('summarizing');
+      const summary = await api.summarize(
+        activePatient?.name ?? 'Patient',
+        transcript,
+        '',
+      );
+      const aiTurn: ConversationTurn = {
+        kind: 'ai-summary',
+        id: `turn-${ts}-ai`,
+        summary: summary.summary,
+        mood: summary.mood,
+        medicationsNoted: summary.medications_noted,
+        urgent: summary.urgent,
+      };
+      setConversation((prev) => [...prev, aiTurn]);
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : 'Could not reach the AI service.');
+    } finally {
+      setPartialTranscript('');
+      setRecordState('idle');
+      setView('voice-idle');
+    }
+  }
 
   return (
     <div
@@ -90,7 +123,6 @@ export default function LogsPage() {
           'linear-gradient(135deg, #E3E5F1 0%, #EAEAF2 50%, #D3D5EC 100%)',
       }}
     >
-      {/* Top bar — patient switcher (left) + Search/Chat actions (right) */}
       <header className="absolute left-[25px] right-[25px] top-[60px] z-10 flex items-center justify-between gap-3">
         <PatientSwitcher
           patients={SAMPLE_PATIENTS}
@@ -111,23 +143,33 @@ export default function LogsPage() {
         </div>
       </header>
 
-      {/* View body */}
       {view !== 'message' ? (
-        <VoiceView view={view} transcript={transcript} />
+        <VoiceView
+          recording={recording}
+          partialTranscript={partialTranscript}
+          busyLabel={busyLabel}
+          error={error}
+        />
       ) : (
         <MessageView turns={conversation} />
       )}
 
-      {/* Bottom action bar — present in all states.
-       * Sits closer to the tab bar than before — gap is now ~12px instead of 40px. */}
       <div className="absolute bottom-[95px] left-[25px] right-[25px] z-10 flex items-center justify-between">
         <IconBox size={48} aria-label="Open keyboard">
           <IconKeyboard className="size-6 text-gray-100" />
         </IconBox>
-        {view === 'voice-recording' ? (
-          <PressToSpeakButton variant="recording" onClick={handleDone} className="w-[216px]" />
+        {recording ? (
+          <PressToSpeakButton
+            variant="recording"
+            onClick={handleDone}
+            className="w-[216px]"
+          />
         ) : (
-          <PressToSpeakButton variant="idle" onClick={handlePressToSpeak} className="w-[216px]" />
+          <PressToSpeakButton
+            variant="idle"
+            onClick={handlePressToSpeak}
+            className="w-[216px]"
+          />
         )}
         <IconBox size={48} aria-label="More actions">
           <IconPlus className="size-6 text-gray-100" />
@@ -137,12 +179,19 @@ export default function LogsPage() {
   );
 }
 
-// ---------- Voice view (idle + recording) ----------
-function VoiceView({ view, transcript }: { view: View; transcript: string }) {
-  const recording = view === 'voice-recording';
+function VoiceView({
+  recording,
+  partialTranscript,
+  busyLabel,
+  error,
+}: {
+  recording: boolean;
+  partialTranscript: string;
+  busyLabel: string;
+  error: string;
+}) {
   return (
     <>
-      {/* "Hi, I am listening" — animated gradient when recording, static gradient idle */}
       <p
         className={clsx(
           'absolute left-1/2 top-[180px] -translate-x-1/2 whitespace-nowrap bg-clip-text text-xl font-bold text-transparent',
@@ -151,39 +200,32 @@ function VoiceView({ view, transcript }: { view: View; transcript: string }) {
             : 'bg-gradient-to-r from-[#1F2782] from-[45%] to-[#6F7FF5]/70',
         )}
       >
-        Hi, I am listening
+        {busyLabel || 'Hi, I am listening'}
       </p>
 
-      {/* Wrapper handles positioning; GradientBlob's inner element handles the pulse */}
       <div className="absolute left-1/2 top-[220px] h-[310px] w-[311px] -translate-x-1/2">
-        <GradientBlob active={recording} className="h-full w-full" />
+        <GradientBlob active={recording || Boolean(busyLabel)} className="h-full w-full" />
       </div>
 
-      {recording && transcript && (
+      {partialTranscript && (
         <p className="absolute left-[40px] right-[40px] top-[540px] text-center text-base leading-snug text-gray-100">
-          {transcript.split(' ').map((word, i, arr) => {
-            const isLastFew = i >= arr.length - 4;
-            return (
-              <span key={i} className={isLastFew ? 'text-gray-100' : 'text-gray-60'}>
-                {word}{' '}
-              </span>
-            );
-          })}
+          {partialTranscript}
+        </p>
+      )}
+
+      {error && (
+        <p className="absolute left-[40px] right-[40px] top-[600px] text-center text-sm text-red-600">
+          {error}
         </p>
       )}
     </>
   );
 }
 
-// ---------- Message view (conversation) ----------
 function MessageView({ turns }: { turns: ConversationTurn[] }) {
   const scrollRef = useRef<HTMLDivElement | null>(null);
-
-  // Auto-scroll to bottom when new turns added
   useEffect(() => {
-    if (scrollRef.current) {
-      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
-    }
+    if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
   }, [turns.length]);
 
   return (
@@ -192,17 +234,45 @@ function MessageView({ turns }: { turns: ConversationTurn[] }) {
       className="absolute left-0 right-0 top-[122px] bottom-[170px] overflow-y-auto px-4 py-2"
     >
       <div className="flex flex-col gap-3">
-        {turns.map((turn) =>
-          turn.kind === 'user-audio' ? (
-            <AudioBubble
-              key={turn.id}
-              time={turn.time}
-              transcript={turn.transcript}
-            />
-          ) : (
-            <TaskCard key={turn.id} intro={turn.intro} tasks={turn.tasks} />
-          ),
-        )}
+        {turns.map((turn) => {
+          if (turn.kind === 'user-audio') {
+            return <AudioBubble key={turn.id} time={turn.time} transcript={turn.transcript} />;
+          }
+          if (turn.kind === 'ai-tasks') {
+            return <TaskCard key={turn.id} intro={turn.intro} tasks={turn.tasks} />;
+          }
+          return <SummaryBubble key={turn.id} turn={turn} />;
+        })}
+      </div>
+    </div>
+  );
+}
+
+function SummaryBubble({
+  turn,
+}: {
+  turn: Extract<ConversationTurn, { kind: 'ai-summary' }>;
+}) {
+  return (
+    <div className="rounded-3xl bg-white p-4 shadow-sm">
+      {turn.urgent && (
+        <div className="mb-2 inline-block rounded-full bg-red-100 px-3 py-1 text-xs font-semibold text-red-700">
+          Urgent — review now
+        </div>
+      )}
+      <p className="text-sm font-semibold uppercase tracking-wide text-gray-60">Visit logged</p>
+      <p className="mt-1 text-base leading-relaxed text-gray-100">{turn.summary}</p>
+      <div className="mt-3 grid grid-cols-2 gap-2 text-sm">
+        <div>
+          <p className="text-xs uppercase text-gray-60">Mood</p>
+          <p className="text-gray-100">{turn.mood || '—'}</p>
+        </div>
+        <div>
+          <p className="text-xs uppercase text-gray-60">Medications</p>
+          <p className="text-gray-100">
+            {turn.medicationsNoted.length ? turn.medicationsNoted.join(', ') : 'None'}
+          </p>
+        </div>
       </div>
     </div>
   );
