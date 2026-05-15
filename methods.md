@@ -258,11 +258,30 @@ Voice      : speech_recognition (Google API today, faster-whisper for offline)
 
 ## Reproducing the Pipeline
 
+### Quick start — just pull the published model
+
+The trained model is published at **[huggingface.co/aarony630/alio-medical](https://huggingface.co/aarony630/alio-medical)**:
+
+```bash
+# 1. Install Ollama (https://ollama.com/download)
+# 2. Pull the fine-tuned model in one command
+ollama pull hf.co/aarony630/alio-medical
+
+# 3. Tell the app to use it
+$env:USE_LOCAL_OLLAMA="1"
+$env:OLLAMA_MODEL="hf.co/aarony630/alio-medical"
+```
+
+That's the full reproduction path for inference — works on any machine with a
+modern GPU (the model is 3.4 GB q4_k_m GGUF, fits in 4 GB VRAM).
+
+### Full pipeline (training from scratch, for transparency)
+
 1. `python build_training_data.py` — needs `GOOGLE_API_KEY` and Kaggle medical transcriptions dataset → produces `data/train.jsonl` + `data/val.jsonl`
 2. Upload JSONLs as Kaggle dataset; open [kaggle_train_gemma4_e2b.ipynb](kaggle_train_gemma4_e2b.ipynb); run all
-3. Download `outputs/gemma4-e2b-medical-gguf/` and `Modelfile` from Kaggle
-4. `ollama create alio-medical -f Modelfile`
-5. `$env:USE_LOCAL_OLLAMA=1; $env:OLLAMA_MODEL=alio-medical; python -m uvicorn nextjs.api:app` — app now runs offline against the fine-tuned model
+3. Download GGUF + Modelfile from the Kaggle notebook's output
+4. `ollama create alio-medical -f Modelfile` (or push to HF: `python scripts/publish_to_hf.py`)
+5. `$env:USE_LOCAL_OLLAMA=1; $env:OLLAMA_MODEL=alio-medical; python -m uvicorn api:app` — app now runs offline against the fine-tuned model
 
 ---
 
