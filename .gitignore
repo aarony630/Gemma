@@ -70,6 +70,8 @@ data/lab_test_results_public.csv
 data/metadata.json
 # HuggingFace / training output
 outputs/
+# Local server stdout/stderr (backend + Next.js dev)
+.logs/
 
 # Claude Code / agent internal workspace
 .agents/

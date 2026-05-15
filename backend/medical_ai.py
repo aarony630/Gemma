@@ -68,6 +68,83 @@ def _call_gemma(system: str, user: str, json_mode: bool = False) -> str:
 def active_model_name() -> str:
     return f"ollama:{_OLLAMA_MODEL}" if _USE_LOCAL_OLLAMA else _MODEL_NAME
 
+
+# ── Lab report interpretation (same system prompt the model was trained on) ──
+
+_LAB_SYSTEM = """\
+You are a medical assistant helping a patient or family member understand lab
+results. You will receive a list of lab test names, their values, and reference
+ranges. Some may be flagged as High or Low.
+
+Your job: write a plain-language explanation (3-5 sentences) of what the
+results mean overall. Focus on: what is normal, what is flagged and why it
+matters, and whether the family should follow up with a doctor soon.
+
+Do NOT diagnose. Do NOT use jargon. If everything is normal, say so clearly.
+
+Reply in EXACTLY this JSON format with no extra text:
+{
+  "summary": "...",
+  "flags": ["..."],
+  "follow_up": "routine" | "soon" | "urgent"
+}
+flags is a list of the abnormal results in plain language (empty list if none).
+follow_up: "routine" = nothing urgent, "soon" = mention at next appointment,
+"urgent" = contact doctor today."""
+
+
+def interpret_lab_text(extracted_text: str) -> dict:
+    """Take raw text extracted from a lab report (e.g., pdfplumber output) and
+    return a structured JSON interpretation. Routes through _call_gemma so it
+    respects USE_LOCAL_OLLAMA."""
+    if not extracted_text.strip():
+        raise ValueError("Lab report text is empty")
+    user_message = f"Lab Results:\n\n{extracted_text.strip()}"
+    raw = _call_gemma(system=_LAB_SYSTEM, user=user_message, json_mode=True)
+    return _parse_json_response(raw)
+
+
+# ── Image OCR for lab report photos (snapped on a phone, scanned, etc.) ──
+# Uses the hosted Gemma 4 31B for the *vision* step; the medical interpretation
+# still runs locally via _call_gemma → Ollama. So PHI for the image OCR DOES go
+# to Google's API briefly, but the reasoning stays on-device. For fully offline
+# image input, swap this for Tesseract or the local Gemma 4 multimodal projector
+# via llama-mtmd-cli.
+
+_VISION_MODEL = os.environ.get("VISION_MODEL", "models/gemma-4-31b-it")
+
+_VISION_EXTRACT_PROMPT = """\
+This is a photo or scan of a medical lab report. Extract ALL test results in
+a clean plain-text format, one per line, preserving:
+  - Test name
+  - Value with units
+  - Normal/reference range
+  - Status flag (High / Low / Normal) if shown
+
+Example output line:
+  Sodium: 138 mmol/L  (Normal range: 135-145)  Normal
+
+Output ONLY the extracted results, no commentary, no headers other than the
+panel name if visible (e.g. "Comprehensive Metabolic Panel"). If the image
+isn't a lab report, output exactly: "NOT_A_LAB_REPORT"."""
+
+
+def extract_lab_text_from_image(image_bytes: bytes, mime_type: str = "image/png") -> str:
+    """OCR a lab-report image using Gemini/Gemma vision. Returns the extracted
+    structured text, ready to feed into interpret_lab_text()."""
+    client = genai.Client(api_key=os.environ["GOOGLE_API_KEY"])
+    response = retry_transient(lambda: client.models.generate_content(
+        model=_VISION_MODEL,
+        contents=[
+            _VISION_EXTRACT_PROMPT,
+            types.Part.from_bytes(data=image_bytes, mime_type=mime_type),
+        ],
+    ))
+    text = (response.text or "").strip()
+    if text == "NOT_A_LAB_REPORT" or not text:
+        raise ValueError("This image doesn't look like a lab report")
+    return text
+
 _HARD_ESCALATION_KEYWORDS = [
     "chest pain",
     "can't breathe",
